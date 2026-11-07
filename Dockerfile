@@ -37,7 +37,27 @@ RUN chmod 755 /usr/local/bin/ws-* /usr/local/bin/install-* /usr/local/bin/isaacs
 
 USER 1000
 ENV WS_AUTOSAVE_MINUTES=10 \
-    ISAACSIM_VERSION=6.2.0.0
+    ISAACSIM_VERSION=6.2.0.0 \
+    PATH="/home/ubuntu/.local/bin:${PATH}" \
+    CLAUDE_CONFIG_DIR=/home/ubuntu/.claude \
+    DISABLE_AUTOUPDATER=1
+
+# Claude Code. Its whole config, MCP servers included, lives in ~/.claude
+# (CLAUDE_CONFIG_DIR), which is synced to R2. Updates come from rebuilding the
+# image; an auto-update on an ephemeral pod would be lost anyway.
+RUN curl -fsSL https://claude.ai/install.sh | bash && claude --version
+
+# MCP for Blender: the add-on runs a socket server inside Blender (auto-starts
+# on launch) and the MCP server Claude Code spawns talks to it. Versions pinned
+# together. Telemetry is opt-in upstream; this also turns off the anonymous
+# usage ping.
+ARG MCP_FOR_BLENDER_VERSION=2.2.7
+RUN BLENDERMCP_ADDONS_DIR="$HOME/.config/blender/${BLENDER_VERSION%.*}/scripts/addons" \
+      uvx "mcp-for-blender@${MCP_FOR_BLENDER_VERSION}" install-addon && \
+    blender -b --python /usr/local/lib/blender-enable-mcp.py && \
+    claude mcp add --scope user blender -e DISABLE_TELEMETRY=true \
+      -- uvx "mcp-for-blender@${MCP_FOR_BLENDER_VERSION}" && \
+    install -m 644 /usr/local/share/ws/CLAUDE.md "$CLAUDE_CONFIG_DIR/CLAUDE.md"
 
 # Shortcuts on the desktop (KDE only runs desktop files there if they're executable)
 RUN mkdir -p "$HOME/Desktop" && \

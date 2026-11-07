@@ -84,6 +84,27 @@ The **Isaac Sim** shortcut installs version `ISAACSIM_VERSION` (default 6.2.0.0)
 from NVIDIA's pip index on first use, then caches it in R2. You'll be asked
 to accept NVIDIA's EULA the first time it runs.
 
+### Claude Code
+Claude Code is installed in the image, with Blender connected through
+[MCP for Blender](https://github.com/ahujasid/blender-mcp) (a community add-on, not
+an official Blender project).
+
+1. Open Blender. The add-on starts its connection on launch. To check it, press
+   `N` in the viewport and open the **MCP for Blender** tab.
+2. Open a terminal and `cd ~/work`, then run `claude`.
+3. **On each new pod:** run `/login` and sign in with your org's SSO in the pod's
+   browser. The login token is deliberately left out of the R2 sync. To keep
+   it across pods, remove the `.credentials.json` exclude in `ws-lib.sh`.
+
+Your Claude Code settings, history and MCP servers (`~/.claude`) *are* synced.
+`~/.claude/CLAUDE.md` tells Claude about this machine: where the apps are, and
+that only `~/work` survives. Edit it as you like. Claude Code updates come from
+rebuilding the image (bump nothing, just re-run the workflow).
+
+The Blender add-on executes whatever Python the agent sends it, so only connect
+agents you trust. Its telemetry is opt-in, and this setup also turns off its
+anonymous usage ping.
+
 ## Customizing what's saved
 Edit `WS_SYNC_DIRS` and `WS_EXCLUDES` in `rootfs/usr/local/lib/ws-lib.sh`.
 Anything outside those directories, including `~/apps`, is lost when the pod is deleted.

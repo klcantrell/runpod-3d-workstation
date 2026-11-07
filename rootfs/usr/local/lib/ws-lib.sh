@@ -27,6 +27,7 @@ declare -A WS_SYNC_DIRS=(
   ["$HOME/work"]="work"
   ["$HOME/.config/blender"]="config/blender"
   ["$HOME/.config/Epic"]="config/Epic"
+  ["$HOME/.claude"]="config/claude"
 )
 
 # Regenerable or noisy files that aren't worth paying to store
@@ -38,6 +39,8 @@ WS_EXCLUDES=(
   --exclude "**/__pycache__/**"
   --exclude "*.blend1"
   --exclude "*.blend@"
+  # Claude Code SSO login token stays on the pod: log in again on each new pod
+  --exclude ".credentials.json"
 )
 
 # Present only after a successful restore. Saving without it would mirror an
