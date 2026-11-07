@@ -53,6 +53,13 @@ RUNPOD_API_KEY=rpa_...
 WS_IMAGE=ghcr.io/<you>/runpod-3d-workstation:latest
 # WS_SPOT=true
 # WS_CLOUD=COMMUNITY
+# Nearest datacenters first; less input lag. Full list at the top of scripts/ws.
+# WS_DATACENTERS=US-IL-1,US-KS-2
+# GPUs to try, in order (default: 4090, A6000, L40S, 6000 Ada, 5090)
+# WS_GPUS="NVIDIA L40S,NVIDIA RTX 6000 Ada Generation"
+# Host driver filter. Default only allows drivers new enough for Isaac Sim;
+# set it empty if `ws up` can't find a machine and you aren't using Isaac Sim.
+# WS_CUDA=
 EOF
 chmod 600 ~/.config/ws/env
 ln -s "$PWD/scripts/ws" /usr/local/bin/ws   # or add scripts/ to PATH
@@ -62,7 +69,7 @@ ln -s "$PWD/scripts/ws" /usr/local/bin/ws   # or add scripts/ to PATH
 
 ```sh
 ws up       # prints https://<pod>-8080.proxy.runpod.net. Log in as ubuntu / desktop_password
-ws status   # is anything running (and costing money)?
+ws status   # GPU, datacenter, $/hr, URL. Is anything running (and costing money)?
 ```
 
 Work inside `~/work` on the pod. That folder is the one that gets saved. When

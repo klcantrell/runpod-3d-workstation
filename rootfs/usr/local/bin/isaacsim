@@ -1,5 +1,14 @@
 #!/bin/bash
 # Launch Isaac Sim, installing it first if needed. Extra args go to isaacsim.
 set -euo pipefail
+
+# The pod gets whatever driver its host has. 570 is the hard floor NVIDIA's own
+# container enforces; NVIDIA's docs recommend newer.
+driver="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1 || true)"
+if [ -n "$driver" ] && [ "${driver%%.*}" -lt 580 ]; then
+  echo "WARNING: host NVIDIA driver is $driver; Isaac Sim recommends 580+. If it" >&2
+  echo "fails to start, terminate this pod and try another host." >&2
+fi
+
 install-isaacsim
 exec "$HOME/apps/isaacsim-${ISAACSIM_VERSION:-6.2.0.0}/.venv/bin/isaacsim" "$@"

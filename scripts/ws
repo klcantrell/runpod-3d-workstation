@@ -18,31 +18,48 @@ WS_GPUS="${WS_GPUS:-NVIDIA GeForce RTX 4090,NVIDIA RTX A6000,NVIDIA L40S,NVIDIA 
 WS_DISK_GB="${WS_DISK_GB:-200}"
 WS_CLOUD="${WS_CLOUD:-SECURE}"   # COMMUNITY is cheaper, less reliable
 WS_SPOT="${WS_SPOT:-false}"      # true = interruptible, ~half price; autosave limits the loss
+# Datacenters to use, tried in order; empty = any. Nearer means less input lag.
+# US-CA-2 US-DE-1 US-GA-1 US-GA-2 US-IL-1 US-KS-2 US-KS-3 US-NC-1 US-TX-1
+# US-TX-3 US-TX-4 US-WA-1 EU-CZ-1 EU-FR-1 EU-NL-1 EU-RO-1 EU-SE-1 AP-JP-1 OC-AU-1
+WS_DATACENTERS="${WS_DATACENTERS:-}"
+# Only hosts whose driver supports one of these CUDA versions. 12.8 = driver 570+,
+# the minimum NVIDIA's Isaac Sim 6.2 container enforces. Empty = any host.
+WS_CUDA="${WS_CUDA-12.8,12.9,13.0}"
 
 API=https://rest.runpod.io/v1
 api() { curl -fsS -H "Authorization: Bearer $RUNPOD_API_KEY" -H "Content-Type: application/json" "$@"; }
 
+# Prints: id status cost_per_hr datacenter gpu name (gpu last; it has spaces)
 find_pod() {
-  api "$API/pods" | WS_NAME="$WS_NAME" python3 -c '
+  api "$API/pods?includeMachine=true" | WS_NAME="$WS_NAME" python3 -c '
 import sys, json, os
 for p in json.load(sys.stdin):
     if p.get("name") == os.environ["WS_NAME"]:
-        print(p["id"], p.get("desiredStatus", "?"), p.get("costPerHr", "?"))'
+        m = p.get("machine") or {}
+        gpu = (m.get("gpuType") or {}).get("displayName") or (p.get("gpu") or {}).get("displayName") or "?"
+        print(p["id"], p.get("desiredStatus", "?"), p.get("costPerHr", "?"), m.get("dataCenterId") or "?", gpu)'
 }
 
 case "${1:-}" in
   up)
     if existing="$(find_pod)" && [ -n "$existing" ]; then
-      echo "Pod already exists: $existing"
-      echo "Desktop: https://${existing%% *}-8080.proxy.runpod.net"
+      echo "Pod already exists. Run: ws status"
       exit 0
     fi
     body="$(WS_NAME="$WS_NAME" WS_IMAGE="$WS_IMAGE" WS_GPUS="$WS_GPUS" WS_DISK_GB="$WS_DISK_GB" \
-            WS_CLOUD="$WS_CLOUD" WS_SPOT="$WS_SPOT" python3 -c '
+            WS_CLOUD="$WS_CLOUD" WS_SPOT="$WS_SPOT" WS_DATACENTERS="$WS_DATACENTERS" \
+            WS_CUDA="$WS_CUDA" python3 -c '
 import json, os
 e = os.environ
 secret = lambda n: "{{ RUNPOD_SECRET_%s }}" % n
+filters = {}
+if e["WS_DATACENTERS"]:
+    filters["dataCenterIds"] = e["WS_DATACENTERS"].split(",")
+    filters["dataCenterPriority"] = "custom"
+if e["WS_CUDA"]:
+    filters["allowedCudaVersions"] = e["WS_CUDA"].split(",")
 print(json.dumps({
+    **filters,
     "name": e["WS_NAME"],
     "imageName": e["WS_IMAGE"],
     "gpuTypeIds": e["WS_GPUS"].split(","),
@@ -63,13 +80,14 @@ print(json.dumps({
 }))')"
     id="$(api -X POST "$API/pods" -d "$body" | python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')"
     echo "Created pod $id. The desktop takes a few minutes to boot."
+    echo "Run 'ws status' in a minute to see which GPU and datacenter you got."
     echo "Desktop: https://$id-8080.proxy.runpod.net  (user: ubuntu, password: your desktop_password secret)"
     ;;
   status)
     p="$(find_pod)"
     [ -n "$p" ] || { echo "No pod named $WS_NAME (nothing is billing)."; exit 0; }
-    read -r id state cost <<<"$p"
-    echo "Pod $id  state=$state  \$$cost/hr"
+    read -r id state cost dc gpu <<<"$p"
+    echo "Pod $id  $gpu  in $dc  state=$state  \$$cost/hr"
     echo "Desktop: https://$id-8080.proxy.runpod.net"
     ;;
   down)
