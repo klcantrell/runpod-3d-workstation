@@ -1,0 +1,3 @@
+#!/bin/bash
+# Restart backoff, same as the base image's services
+sleep 2

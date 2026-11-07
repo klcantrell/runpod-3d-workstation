@@ -1,0 +1,14 @@
+#!/bin/bash
+# Save everything, then delete this pod so billing stops. If the save fails the
+# pod is left running so nothing is lost.
+set -uo pipefail
+. /usr/local/lib/ws-lib.sh
+
+if ! ws-save; then
+  log "SAVE FAILED, pod NOT terminated. Fix the error above and try again."
+  read -rp "Press Enter to close..."
+  exit 1
+fi
+: "${RUNPOD_POD_ID:?RUNPOD_POD_ID not set, are we on Runpod?}"
+log "terminating pod $RUNPOD_POD_ID"
+runpodctl pod delete "$RUNPOD_POD_ID"

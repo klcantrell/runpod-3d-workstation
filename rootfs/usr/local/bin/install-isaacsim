@@ -1,0 +1,38 @@
+#!/bin/bash
+# Install Isaac Sim into ~/apps (container disk, not synced). First run installs
+# from NVIDIA's pip index and caches a tarball in R2; later pods restore that
+# tarball, which is faster. R2 doesn't charge for downloads.
+set -euo pipefail
+. /usr/local/lib/ws-lib.sh
+
+ver="${ISAACSIM_VERSION:-6.2.0.0}"
+name="isaacsim-$ver"
+dest="$HOME/apps/$name"
+cache="$REMOTE/apps/$name.tar.zst"
+
+if [ -x "$dest/.venv/bin/isaacsim" ]; then
+  log "Isaac Sim $ver already installed"
+  exit 0
+fi
+mkdir -p "$HOME/apps"
+
+if [ -n "$(rclone lsf "$cache" 2>/dev/null)" ]; then
+  log "restoring Isaac Sim $ver from R2 cache"
+  rclone cat "$cache" | zstd -dc -T0 | tar -x -C "$HOME/apps"
+  exit 0
+fi
+
+log "installing Isaac Sim $ver from pypi.nvidia.com (first time; takes a while)"
+rm -rf "$dest"
+# Keep uv's Python inside $dest so the cached tarball is self-contained
+export UV_PYTHON_INSTALL_DIR="$dest/python"
+uv venv --python 3.12 "$dest/.venv"
+uv pip install --python "$dest/.venv" \
+  --extra-index-url https://pypi.nvidia.com --index-strategy unsafe-best-match \
+  "isaacsim[all,extscache]==$ver"
+
+log "caching install to $cache"
+tar -C "$HOME/apps" -cf - "$name" | zstd -T0 -3 \
+  | rclone rcat "$cache" --s3-chunk-size 64M \
+  || log "cache upload failed (install is fine, next pod will reinstall from pip)"
+log "done"

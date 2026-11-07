@@ -1,0 +1,5 @@
+#!/bin/bash
+# Launch Isaac Sim, installing it first if needed. Extra args go to isaacsim.
+set -euo pipefail
+install-isaacsim
+exec "$HOME/apps/isaacsim-${ISAACSIM_VERSION:-6.2.0.0}/.venv/bin/isaacsim" "$@"

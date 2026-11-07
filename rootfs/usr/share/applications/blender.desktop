@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Blender
+Exec=blender %f
+Icon=/opt/blender/blender.svg
+Terminal=false
+Categories=Graphics;

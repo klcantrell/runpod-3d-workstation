@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Isaac Sim
+Exec=isaacsim
+Icon=applications-science
+Terminal=true
+Categories=Graphics;

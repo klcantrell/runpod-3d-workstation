@@ -1,0 +1,90 @@
+#!/bin/bash
+# Manage the ephemeral 3D workstation pod from your Mac.
+#
+#   ws up       create the pod and print its desktop URL
+#   ws status   show the pod, its cost, and its URL
+#   ws down     delete the pod (prefer "Save & Terminate" on the pod's desktop)
+#
+# Needs RUNPOD_API_KEY in the environment or in ~/.config/ws/env. Settings below
+# can be overridden there too.
+set -euo pipefail
+
+[ -f "$HOME/.config/ws/env" ] && . "$HOME/.config/ws/env"
+: "${RUNPOD_API_KEY:?set RUNPOD_API_KEY (Runpod > Settings > API Keys) in ~/.config/ws/env}"
+: "${WS_IMAGE:?set WS_IMAGE, e.g. ghcr.io/<you>/runpod-3d-workstation:latest, in ~/.config/ws/env}"
+WS_NAME="${WS_NAME:-3d-workstation}"
+# RTX cards only: Isaac Sim needs RT cores, which A100/H100 lack. Tried in order.
+WS_GPUS="${WS_GPUS:-NVIDIA GeForce RTX 4090,NVIDIA RTX A6000,NVIDIA L40S,NVIDIA RTX 6000 Ada Generation,NVIDIA GeForce RTX 5090}"
+WS_DISK_GB="${WS_DISK_GB:-200}"
+WS_CLOUD="${WS_CLOUD:-SECURE}"   # COMMUNITY is cheaper, less reliable
+WS_SPOT="${WS_SPOT:-false}"      # true = interruptible, ~half price; autosave limits the loss
+
+API=https://rest.runpod.io/v1
+api() { curl -fsS -H "Authorization: Bearer $RUNPOD_API_KEY" -H "Content-Type: application/json" "$@"; }
+
+find_pod() {
+  api "$API/pods" | WS_NAME="$WS_NAME" python3 -c '
+import sys, json, os
+for p in json.load(sys.stdin):
+    if p.get("name") == os.environ["WS_NAME"]:
+        print(p["id"], p.get("desiredStatus", "?"), p.get("costPerHr", "?"))'
+}
+
+case "${1:-}" in
+  up)
+    if existing="$(find_pod)" && [ -n "$existing" ]; then
+      echo "Pod already exists: $existing"
+      echo "Desktop: https://${existing%% *}-8080.proxy.runpod.net"
+      exit 0
+    fi
+    body="$(WS_NAME="$WS_NAME" WS_IMAGE="$WS_IMAGE" WS_GPUS="$WS_GPUS" WS_DISK_GB="$WS_DISK_GB" \
+            WS_CLOUD="$WS_CLOUD" WS_SPOT="$WS_SPOT" python3 -c '
+import json, os
+e = os.environ
+secret = lambda n: "{{ RUNPOD_SECRET_%s }}" % n
+print(json.dumps({
+    "name": e["WS_NAME"],
+    "imageName": e["WS_IMAGE"],
+    "gpuTypeIds": e["WS_GPUS"].split(","),
+    "gpuTypePriority": "custom",
+    "gpuCount": 1,
+    "cloudType": e["WS_CLOUD"],
+    "interruptible": e["WS_SPOT"] == "true",
+    "containerDiskInGb": int(e["WS_DISK_GB"]),
+    "volumeInGb": 0,
+    "ports": ["8080/http"],
+    "env": {
+        "PASSWD": secret("desktop_password"),
+        "R2_ACCOUNT_ID": secret("r2_account_id"),
+        "R2_ACCESS_KEY_ID": secret("r2_access_key_id"),
+        "R2_SECRET_ACCESS_KEY": secret("r2_secret_access_key"),
+        "R2_BUCKET": secret("r2_bucket"),
+    },
+}))')"
+    id="$(api -X POST "$API/pods" -d "$body" | python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')"
+    echo "Created pod $id. The desktop takes a few minutes to boot."
+    echo "Desktop: https://$id-8080.proxy.runpod.net  (user: ubuntu, password: your desktop_password secret)"
+    ;;
+  status)
+    p="$(find_pod)"
+    [ -n "$p" ] || { echo "No pod named $WS_NAME (nothing is billing)."; exit 0; }
+    read -r id state cost <<<"$p"
+    echo "Pod $id  state=$state  \$$cost/hr"
+    echo "Desktop: https://$id-8080.proxy.runpod.net"
+    ;;
+  down)
+    p="$(find_pod)"
+    [ -n "$p" ] || { echo "No pod named $WS_NAME."; exit 0; }
+    id="${p%% *}"
+    echo "This deletes pod $id immediately. Anything changed since the last autosave"
+    echo "(every ${WS_AUTOSAVE_MINUTES:-10} min) is lost. Prefer 'Save & Terminate' on the pod's desktop."
+    read -rp "Delete anyway? [y/N] " ok
+    [ "$ok" = y ] || exit 1
+    api -X DELETE "$API/pods/$id" >/dev/null
+    echo "Deleted."
+    ;;
+  *)
+    sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'
+    exit 1
+    ;;
+esac

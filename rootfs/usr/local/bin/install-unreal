@@ -1,0 +1,55 @@
+#!/bin/bash
+# Install the Unreal Engine Linux build into ~/apps/unreal.
+#
+#   install-unreal ~/Downloads/Linux_Unreal_Engine_X.Y.Z.zip
+#       Install from a zip you downloaded from Epic, and cache the zip in R2.
+#   install-unreal
+#       Install from the newest zip cached in R2.
+#
+# Epic requires a login to download, so the first zip has to come from
+# https://www.unrealengine.com/linux (open it in the pod's browser).
+set -euo pipefail
+. /usr/local/lib/ws-lib.sh
+
+dest="$HOME/apps/unreal"
+editor="$dest/Engine/Binaries/Linux/UnrealEditor"
+cache_dir="$REMOTE/apps/unreal"
+
+if [ -x "$editor" ]; then
+  log "Unreal already installed at $dest"
+  exit 0
+fi
+mkdir -p "$HOME/apps"
+
+zip="${1:-}"
+downloaded=""
+if [ -z "$zip" ]; then
+  latest="$(rclone lsf "$cache_dir" --include '*.zip' 2>/dev/null | sort -V | tail -1)"
+  if [ -z "$latest" ]; then
+    cat >&2 <<MSG
+No Unreal build cached in R2 yet.
+1. Open https://www.unrealengine.com/linux in the pod's browser and sign in.
+2. Download the Linux zip into ~/Downloads.
+3. Run:  install-unreal ~/Downloads/<the zip>
+MSG
+    exit 1
+  fi
+  zip="$HOME/apps/$latest"
+  downloaded="$zip"
+  log "downloading $latest from R2"
+  rclone copyto "$cache_dir/$latest" "$zip" --progress
+else
+  log "caching $(basename "$zip") in R2"
+  rclone copyto "$zip" "$cache_dir/$(basename "$zip")" --progress
+fi
+
+log "extracting (several minutes)"
+tmp="$(mktemp -d "$HOME/apps/.unreal-XXXX")"
+unzip -q "$zip" -d "$tmp"
+engine="$(find "$tmp" -maxdepth 3 -type d -name Engine -print -quit)"
+[ -n "$engine" ] || { log "no Engine/ directory found in zip" >&2; exit 1; }
+rm -rf "$dest"
+mv "$(dirname "$engine")" "$dest"
+rm -rf "$tmp"
+[ -n "$downloaded" ] && rm -f "$downloaded"
+log "installed: $editor"

@@ -1,0 +1,5 @@
+#!/bin/bash
+# Launch Unreal Editor, installing it from the R2 cache first if needed.
+set -euo pipefail
+install-unreal
+exec "$HOME/apps/unreal/Engine/Binaries/Linux/UnrealEditor" "$@"

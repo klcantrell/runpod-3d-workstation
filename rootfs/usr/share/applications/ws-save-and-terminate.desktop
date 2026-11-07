@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Save & Terminate Pod
+Exec=ws-save-and-terminate
+Icon=system-shutdown
+Terminal=true
+Categories=Graphics;

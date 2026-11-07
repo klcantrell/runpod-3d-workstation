@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Unreal Editor
+Exec=unreal
+Icon=applications-games
+Terminal=true
+Categories=Graphics;

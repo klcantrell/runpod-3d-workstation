@@ -1,0 +1,28 @@
+#!/bin/bash
+# Restore work from R2 at startup, then autosave every WS_AUTOSAVE_MINUTES.
+# On SIGTERM (pod stopping) it makes one last save attempt.
+XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/runtime-ubuntu}"
+until [ -f "${XDG_RUNTIME_DIR}/container-env" ]; do sleep 0.5; done
+# shellcheck disable=SC1091  # written by container-entrypoint.sh at startup
+. "${XDG_RUNTIME_DIR}/container-env"
+
+if [ -z "${R2_BUCKET:-}" ]; then
+  echo "[r2-sync] R2_* env not set; sync disabled"
+  exec sleep infinity
+fi
+
+# Restore once per container. s6 restarts this service if it dies, and a
+# second restore would clobber newer local edits.
+if [ ! -f "${XDG_RUNTIME_DIR}/ws-restored" ]; then
+  until /usr/local/bin/ws-restore; do
+    echo "[r2-sync] restore failed, retrying in 30s"
+    sleep 30
+  done
+fi
+
+trap '/usr/local/bin/ws-save; exit 0' TERM INT
+while true; do
+  sleep "$(( ${WS_AUTOSAVE_MINUTES:-10} * 60 ))" &
+  wait $!
+  /usr/local/bin/ws-save || echo "[r2-sync] autosave failed"
+done

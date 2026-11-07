@@ -1,0 +1,14 @@
+#!/bin/bash
+# Pull saved work from R2 onto this pod. Runs automatically at startup.
+set -euo pipefail
+. /usr/local/lib/ws-lib.sh
+
+exec 9>"$WS_LOCK"; flock 9
+for dir in "${!WS_SYNC_DIRS[@]}"; do
+  prefix="${WS_SYNC_DIRS[$dir]}"
+  mkdir -p "$dir"
+  log "restoring $REMOTE/$prefix -> $dir"
+  rclone copy "$REMOTE/$prefix" "$dir" "${WS_EXCLUDES[@]}"
+done
+touch "$WS_RESTORED_MARKER"
+log "restore complete"

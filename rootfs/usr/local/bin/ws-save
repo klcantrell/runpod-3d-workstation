@@ -1,0 +1,21 @@
+#!/bin/bash
+# Push work to R2. Files you deleted or overwrote since the last save are moved
+# to .trash/<timestamp>/ in the bucket, not destroyed.
+set -euo pipefail
+. /usr/local/lib/ws-lib.sh
+
+if [ ! -f "$WS_RESTORED_MARKER" ]; then
+  log "refusing to save: restore hasn't completed (run ws-restore first)" >&2
+  exit 1
+fi
+
+exec 9>"$WS_LOCK"; flock 9
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+for dir in "${!WS_SYNC_DIRS[@]}"; do
+  [ -d "$dir" ] || continue
+  prefix="${WS_SYNC_DIRS[$dir]}"
+  log "saving $dir -> $REMOTE/$prefix"
+  rclone sync "$dir" "$REMOTE/$prefix" "${WS_EXCLUDES[@]}" \
+    --backup-dir "$REMOTE/.trash/$stamp/$prefix"
+done
+log "save complete"

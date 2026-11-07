@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Save Work to R2
+Exec=bash -c 'ws-save; read -rp "Press Enter to close..."'
+Icon=document-save
+Terminal=true
+Categories=Graphics;
