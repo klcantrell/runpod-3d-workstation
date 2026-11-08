@@ -50,13 +50,15 @@ on_pod 'test -f /tmp/runtime-ubuntu/ws-restored' || { docker logs "$net-pod" | t
 on_pod 'grep -q restored ~/work/hello.txt' || fail "restore didn't bring back work/hello.txt"
 pass "r2-sync service restores at boot"
 
+# 127.0.0.1, not localhost: Selkies redirects a page loaded over ::1 (where
+# curl's localhost lands) to the IPv4 loopback, because WebRTC can't stream there
 for _ in $(seq 1 40); do
-  code="$(on_pod 'curl -s -o /dev/null -w "%{http_code}" -u ubuntu:smoke-test-pass http://localhost:8080/' || true)"
+  code="$(on_pod 'curl -s -o /dev/null -w "%{http_code}" -u ubuntu:smoke-test-pass http://127.0.0.1:8080/' || true)"
   [ "$code" = 200 ] && break
   sleep 3
 done
 [ "$code" = 200 ] || { docker logs "$net-pod" | tail -50; fail "desktop didn't answer over HTTP on 8080 (got $code)"; }
-code="$(on_pod 'curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/')"
+code="$(on_pod 'curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/')"
 [ "$code" = 401 ] || fail "desktop answered without a password (got $code)"
 pass "desktop serves plain HTTP on 8080 behind basic auth"
 
