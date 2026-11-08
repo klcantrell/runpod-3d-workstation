@@ -5,7 +5,7 @@
 set -euo pipefail
 . /usr/local/lib/ws-lib.sh
 
-ver="${ISAACSIM_VERSION:-6.2.0.0}"
+ver="${ISAACSIM_VERSION:?set in the Dockerfile}"
 name="isaacsim-$ver"
 dest="$HOME/apps/$name"
 cache="$REMOTE/apps/$name.tar.zst"

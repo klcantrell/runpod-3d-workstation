@@ -1,0 +1,15 @@
+#!/bin/bash
+# Re-apply the image's own Claude Code setup on top of what was restored from
+# R2. Runs at boot after restore, so an image upgrade takes effect instead of
+# being overwritten by the synced copy.
+set -euo pipefail
+
+# Claude Code's Blender MCP server, pinned to the add-on version in this image
+claude mcp remove --scope user blender >/dev/null 2>&1 || true
+claude mcp add --scope user blender -e DISABLE_TELEMETRY=true \
+  -- uvx "mcp-for-blender@${MCP_FOR_BLENDER_VERSION:?}"
+
+# Default instructions for Claude; a copy the user has edited is left alone
+if [ ! -f "$CLAUDE_CONFIG_DIR/CLAUDE.md" ]; then
+  install -D -m 644 /usr/local/share/ws/CLAUDE.md "$CLAUDE_CONFIG_DIR/CLAUDE.md"
+fi

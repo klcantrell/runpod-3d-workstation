@@ -1,0 +1,15 @@
+#!/bin/bash
+# Push back the session time limit: the pod saves and deletes itself
+# WS_MAX_HOURS after boot unless extended.
+#
+#   ws-extend [hours]   keep the pod for this many hours from now (default 2)
+set -euo pipefail
+. /usr/local/lib/ws-lib.sh
+
+hours="${1:-2}"
+case "$hours" in
+  "" | *[!0-9]*) echo "usage: ws-extend [hours]" >&2; exit 1 ;;
+esac
+deadline=$(( $(date +%s) + hours * 3600 ))
+echo "$deadline" > "$WS_DEADLINE"
+log "pod will save and delete itself in $hours h, at $(date -u -d "@$deadline" +%H:%M) UTC"
