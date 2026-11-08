@@ -1,8 +1,11 @@
 #!/bin/bash
 # Push work to R2. Files you deleted or overwrote since the last save are moved
 # to .trash/<timestamp>/ in the bucket, not destroyed.
-set -euo pipefail
-. /usr/local/lib/ws-lib.sh
+#
+# Each dir is saved even if another one fails; the exit status is non-zero if
+# any failed.
+set -uo pipefail
+. /usr/local/lib/ws-lib.sh || exit 1
 
 if [ ! -f "$WS_RESTORED_MARKER" ]; then
   log "refusing to save: restore hasn't completed (run ws-restore first)" >&2
@@ -11,11 +14,22 @@ fi
 
 exec 9>"$WS_LOCK"; flock 9
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+failed=()
 for dir in "${!WS_SYNC_DIRS[@]}"; do
   [ -d "$dir" ] || continue
   prefix="${WS_SYNC_DIRS[$dir]}"
+  # Claude Code appends to its session logs constantly; without this a log
+  # growing mid-upload fails the whole dir.
+  extra=()
+  [ "$prefix" = config/claude ] && extra=(--local-no-check-updated)
   log "saving $dir -> $REMOTE/$prefix"
-  rclone sync "$dir" "$REMOTE/$prefix" "${WS_EXCLUDES[@]}" \
-    --backup-dir "$REMOTE/.trash/$stamp/$prefix"
+  rclone sync "$dir" "$REMOTE/$prefix" "${WS_EXCLUDES[@]}" "${extra[@]}" \
+    --backup-dir "$REMOTE/.trash/$stamp/$prefix" || failed+=("$dir")
 done
+
+if [ "${#failed[@]}" -gt 0 ]; then
+  log "save INCOMPLETE, failed: ${failed[*]}" >&2
+  exit 1
+fi
+date -u +%Y-%m-%dT%H:%M:%SZ > "$WS_LAST_SAVE"
 log "save complete"

@@ -1,14 +1,22 @@
 #!/bin/bash
 # Save everything, then delete this pod so billing stops. If the save fails the
 # pod is left running so nothing is lost.
+#
+#   ws-save-and-terminate          from the desktop; waits for Enter on failure
+#   ws-save-and-terminate --yes    unattended (session time limit)
 set -uo pipefail
-. /usr/local/lib/ws-lib.sh
+. /usr/local/lib/ws-lib.sh || exit 1
 
-if ! ws-save; then
-  log "SAVE FAILED, pod NOT terminated. Fix the error above and try again."
-  read -rp "Press Enter to close..."
+interactive=true
+[ "${1:-}" = --yes ] && interactive=false
+fail() {
+  alert "$1" "$2"
+  if $interactive; then read -rp "Press Enter to close..."; fi
   exit 1
-fi
-: "${RUNPOD_POD_ID:?RUNPOD_POD_ID not set, are we on Runpod?}"
+}
+
+ws-save || fail "SAVE FAILED, pod NOT terminated" "Fix the error and try again. Nothing was deleted."
+[ -n "${RUNPOD_POD_ID:-}" ] || fail "Pod NOT deleted" "RUNPOD_POD_ID is not set; are we on Runpod? Run 'ws down' on your Mac."
 log "terminating pod $RUNPOD_POD_ID"
-runpodctl pod delete "$RUNPOD_POD_ID"
+runpodctl pod delete "$RUNPOD_POD_ID" ||
+  fail "Pod NOT deleted, STILL BILLING" "Your work is saved. Run 'ws down' on your Mac to delete the pod."

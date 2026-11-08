@@ -1,28 +1,59 @@
 #!/bin/bash
 # Restore work from R2 at startup, then autosave every WS_AUTOSAVE_MINUTES.
+# WS_MAX_HOURS after boot (0 = never) it saves and deletes the pod, with a
+# warning 15 minutes before; ws-extend pushes that back.
 # On SIGTERM (pod stopping) it makes one last save attempt.
 XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/runtime-ubuntu}"
 until [ -f "${XDG_RUNTIME_DIR}/container-env" ]; do sleep 0.5; done
-# shellcheck disable=SC1091  # written by container-entrypoint.sh at startup
-. "${XDG_RUNTIME_DIR}/container-env"
-
-if [ -z "${R2_BUCKET:-}" ]; then
-  echo "[r2-sync] R2_* env not set; sync disabled"
-  exec sleep infinity
-fi
+# R2_* are guaranteed by ws-entrypoint; this also loads container-env.
+. /usr/local/lib/ws-lib.sh
 
 # Restore once per container. s6 restarts this service if it dies, and a
-# second restore would clobber newer local edits.
-if [ ! -f "${XDG_RUNTIME_DIR}/ws-restored" ]; then
+# second restore is unnecessary.
+if [ ! -f "$WS_RESTORED_MARKER" ]; then
   until /usr/local/bin/ws-restore; do
-    echo "[r2-sync] restore failed, retrying in 30s"
+    alert "Restore from R2 FAILED" "Retrying every 30s. Nothing is saved until it succeeds. Run ws-restore in a terminal to see why."
     sleep 30
   done
 fi
+/usr/local/bin/ws-reconcile ||
+  alert "Claude Code's Blender connection wasn't set up" "Run ws-reconcile in a terminal to see why."
+
+# The time limit counts from boot, not from service restarts
+if [ "${WS_MAX_HOURS:-0}" -gt 0 ] && [ ! -f "$WS_DEADLINE" ]; then
+  echo $(( $(date +%s) + WS_MAX_HOURS * 3600 )) > "$WS_DEADLINE"
+fi
 
 trap '/usr/local/bin/ws-save; exit 0' TERM INT
+autosave=$(( ${WS_AUTOSAVE_MINUTES:-10} * 60 ))
+next_save=$(( $(date +%s) + autosave ))
+warned=""
 while true; do
-  sleep "$(( ${WS_AUTOSAVE_MINUTES:-10} * 60 ))" &
+  sleep 60 &
   wait $!
-  /usr/local/bin/ws-save || echo "[r2-sync] autosave failed"
+  now=$(date +%s)
+
+  if [ "$now" -ge "$next_save" ]; then
+    /usr/local/bin/ws-save ||
+      alert "Autosave FAILED" "Recent work is not in R2. Run ws-save in a terminal to see why."
+    next_save=$(( $(date +%s) + autosave ))
+  fi
+
+  [ -f "$WS_DEADLINE" ] || continue
+  deadline=$(cat "$WS_DEADLINE")
+  if [ "$now" -ge "$deadline" ]; then
+    notify "Session time limit reached" "Saving and deleting the pod."
+    if /usr/local/bin/ws-save-and-terminate --yes; then
+      # Deleted; Runpod stops the container shortly
+      sleep 600 &
+      wait $!
+    else
+      # Still here: try again in 10 minutes rather than every minute
+      echo $(( now + 600 )) > "$WS_DEADLINE"
+    fi
+  elif [ $(( deadline - now )) -le 900 ] && [ "$warned" != "$deadline" ]; then
+    alert "Pod saves and deletes itself in $(( (deadline - now + 59) / 60 )) min" \
+      "Run ws-extend in a terminal to keep it 2 more hours (ws-extend 4 for 4)."
+    warned="$deadline"
+  fi
 done

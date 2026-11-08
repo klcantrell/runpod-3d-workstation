@@ -7,6 +7,9 @@ It is deleted when the user is done.
   R2 at boot and saved every 10 minutes. Put projects, scripts, and outputs in
   `~/work`; anything elsewhere is lost. Run `ws-save` to save immediately.
 - `~/apps` (Isaac Sim, Unreal) is reinstalled from an R2 cache on each pod.
+- The pod saves and deletes itself `WS_MAX_HOURS` after boot (the user gets a
+  warning 15 minutes before). Before a long render or simulation, tell the user
+  to run `ws-extend <hours>` first.
 
 ## Apps
 

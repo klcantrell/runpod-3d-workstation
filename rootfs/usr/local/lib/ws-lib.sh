@@ -1,4 +1,5 @@
 # Shared settings for the ws-* scripts. Sourced, not executed.
+# shellcheck shell=bash disable=SC2034  # the variables are used by those scripts
 
 # Services and desktop launchers don't inherit the pod's env directly; the base
 # image's entrypoint writes it here.
@@ -23,6 +24,7 @@ export RCLONE_TRANSFERS=16 RCLONE_CHECKERS=32 RCLONE_S3_UPLOAD_CONCURRENCY=8
 REMOTE="r2:${R2_BUCKET}"
 
 # Local dir -> bucket prefix. Everything you want to survive the pod goes here.
+# The image must not ship files inside these dirs (see the Dockerfile).
 declare -A WS_SYNC_DIRS=(
   ["$HOME/work"]="work"
   ["$HOME/.config/blender"]="config/blender"
@@ -34,6 +36,8 @@ declare -A WS_SYNC_DIRS=(
 WS_EXCLUDES=(
   --exclude "**/Intermediate/**"
   --exclude "**/DerivedDataCache/**"
+  # Unreal 5.4+ local DDC (~/.config/Epic/UnrealEngine/Common/Zen/Data)
+  --exclude "**/Zen/Data/**"
   --exclude "**/Saved/Logs/**"
   --exclude "**/Saved/Crashes/**"
   --exclude "**/__pycache__/**"
@@ -47,5 +51,13 @@ WS_EXCLUDES=(
 # empty pod over the bucket.
 WS_RESTORED_MARKER="${XDG_RUNTIME_DIR}/ws-restored"
 WS_LOCK="${XDG_RUNTIME_DIR}/ws-sync.lock"
+# Time of the last complete save, and when the pod deletes itself (epoch seconds)
+WS_LAST_SAVE="${XDG_RUNTIME_DIR}/ws-last-save"
+WS_DEADLINE="${XDG_RUNTIME_DIR}/ws-deadline"
 
 log() { echo "[ws $(date -u +%H:%M:%S)] $*"; }
+
+# Desktop notification, also logged. Best effort: there's no session bus until
+# Plasma is up. alert is for failures and stays on screen until dismissed.
+notify() { log "$*"; notify-send -a Workstation "$1" "${2:-}" 2>/dev/null || true; }
+alert() { log "$*" >&2; notify-send -a Workstation -u critical "$1" "${2:-}" 2>/dev/null || true; }

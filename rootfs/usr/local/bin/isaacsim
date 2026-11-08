@@ -11,4 +11,4 @@ if [ -n "$driver" ] && [ "${driver%%.*}" -lt 580 ]; then
 fi
 
 install-isaacsim
-exec "$HOME/apps/isaacsim-${ISAACSIM_VERSION:-6.2.0.0}/.venv/bin/isaacsim" "$@"
+exec "$HOME/apps/isaacsim-${ISAACSIM_VERSION:?set in the Dockerfile}/.venv/bin/isaacsim" "$@"

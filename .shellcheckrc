@@ -1,0 +1,3 @@
+# The ws-* scripts source /usr/local/lib/ws-lib.sh, which only exists in the
+# image; CI lints that file on its own.
+disable=SC1091

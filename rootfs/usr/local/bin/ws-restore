@@ -4,11 +4,14 @@ set -euo pipefail
 . /usr/local/lib/ws-lib.sh
 
 exec 9>"$WS_LOCK"; flock 9
+notify "Restoring your work from R2" "Wait for \"Restore complete\" before opening Blender or Claude Code."
 for dir in "${!WS_SYNC_DIRS[@]}"; do
   prefix="${WS_SYNC_DIRS[$dir]}"
   mkdir -p "$dir"
   log "restoring $REMOTE/$prefix -> $dir"
-  rclone copy "$REMOTE/$prefix" "$dir" "${WS_EXCLUDES[@]}"
+  # --update: a local file newer than the R2 copy was written on this pod (e.g.
+  # saved while restore was running, or before a retry); keep it.
+  rclone copy "$REMOTE/$prefix" "$dir" "${WS_EXCLUDES[@]}" --update
 done
 touch "$WS_RESTORED_MARKER"
-log "restore complete"
+notify "Restore complete"

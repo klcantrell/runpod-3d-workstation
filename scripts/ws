@@ -3,106 +3,129 @@
 #
 #   ws up       create the pod and print its desktop URL
 #   ws status   show the pod, its cost, and its URL
+#   ws logs     show the pod's container log (e.g. why the desktop didn't start)
 #   ws down     delete the pod (prefer "Save & Terminate" on the pod's desktop)
 #
-# Needs RUNPOD_API_KEY in the environment or in ~/.config/ws/env. Settings below
-# can be overridden there too.
+# Needs runpodctl v3 (brew install runpod/runpodctl/runpodctl), signed in with
+# 'runpodctl doctor' or given RUNPOD_API_KEY. Settings below can be overridden
+# in ~/.config/ws/env.
 set -euo pipefail
 
+# shellcheck disable=SC1091
 [ -f "$HOME/.config/ws/env" ] && . "$HOME/.config/ws/env"
-: "${RUNPOD_API_KEY:?set RUNPOD_API_KEY (Runpod > Settings > API Keys) in ~/.config/ws/env}"
-: "${WS_IMAGE:?set WS_IMAGE, e.g. ghcr.io/<you>/runpod-3d-workstation:latest, in ~/.config/ws/env}"
+command -v runpodctl >/dev/null || { echo "runpodctl not found: brew install runpod/runpodctl/runpodctl" >&2; exit 1; }
+if [ -n "${RUNPOD_API_KEY:-}" ]; then export RUNPOD_API_KEY; fi
+# Never stop at runpodctl's interactive "newer version available" prompt
+export RUNPOD_NO_UPDATE_CHECK=1
+
 WS_NAME="${WS_NAME:-3d-workstation}"
 # RTX cards only: Isaac Sim needs RT cores, which A100/H100 lack. Tried in order.
 WS_GPUS="${WS_GPUS:-NVIDIA GeForce RTX 4090,NVIDIA RTX A6000,NVIDIA L40S,NVIDIA RTX 6000 Ada Generation,NVIDIA GeForce RTX 5090}"
 WS_DISK_GB="${WS_DISK_GB:-200}"
 WS_CLOUD="${WS_CLOUD:-SECURE}"   # COMMUNITY is cheaper, less reliable
-WS_SPOT="${WS_SPOT:-false}"      # true = interruptible, ~half price; autosave limits the loss
-# Datacenters to use, tried in order; empty = any. Nearer means less input lag.
+# Datacenters to allow, comma-separated; empty = any. Nearer means less input lag.
 # US-CA-2 US-DE-1 US-GA-1 US-GA-2 US-IL-1 US-KS-2 US-KS-3 US-NC-1 US-TX-1
 # US-TX-3 US-TX-4 US-WA-1 EU-CZ-1 EU-FR-1 EU-NL-1 EU-RO-1 EU-SE-1 AP-JP-1 OC-AU-1
 WS_DATACENTERS="${WS_DATACENTERS:-}"
-# Only hosts whose driver supports one of these CUDA versions. 12.8 = driver 570+,
-# the minimum NVIDIA's Isaac Sim 6.2 container enforces. Empty = any host.
-WS_CUDA="${WS_CUDA-12.8,12.9,13.0}"
+# Only hosts whose driver supports at least this CUDA version; empty = any host.
+# The isaacsim launcher warns when the driver is too old.
+WS_MIN_CUDA="${WS_MIN_CUDA:-}"
+# Only needed if the GHCR package is private (Runpod > Container Registry Auth)
+WS_REGISTRY_AUTH_ID="${WS_REGISTRY_AUTH_ID:-}"
 
-API=https://rest.runpod.io/v1
-api() { curl -fsS -H "Authorization: Bearer $RUNPOD_API_KEY" -H "Content-Type: application/json" "$@"; }
+# Secrets are resolved by Runpod when the pod starts. The image refuses to start
+# if one isn't (ws logs shows which).
+ENV_JSON='{
+  "PASSWD": "{{ RUNPOD_SECRET_desktop_password }}",
+  "R2_ACCOUNT_ID": "{{ RUNPOD_SECRET_r2_account_id }}",
+  "R2_ACCESS_KEY_ID": "{{ RUNPOD_SECRET_r2_access_key_id }}",
+  "R2_SECRET_ACCESS_KEY": "{{ RUNPOD_SECRET_r2_secret_access_key }}",
+  "R2_BUCKET": "{{ RUNPOD_SECRET_r2_bucket }}"
+}'
 
-# Prints: id status cost_per_hr datacenter gpu name (gpu last; it has spaces)
-find_pod() {
-  api "$API/pods?includeMachine=true" | WS_NAME="$WS_NAME" python3 -c '
+# Prints one line per pod named WS_NAME: id status cost_per_hr gpu (gpu last;
+# it has spaces). Fails, rather than printing nothing, if the API call fails.
+find_pods() {
+  local json
+  json="$(runpodctl pod list --all --name "$WS_NAME")" || return 1
+  WS_NAME="$WS_NAME" python3 -c '
 import sys, json, os
-for p in json.load(sys.stdin):
+for p in json.load(sys.stdin) or []:
     if p.get("name") == os.environ["WS_NAME"]:
-        m = p.get("machine") or {}
-        gpu = (m.get("gpuType") or {}).get("displayName") or (p.get("gpu") or {}).get("displayName") or "?"
-        print(p["id"], p.get("desiredStatus", "?"), p.get("costPerHr", "?"), m.get("dataCenterId") or "?", gpu)'
+        status = p.get("runtimeStatus") or p.get("desiredStatus") or "?"
+        print(p["id"], status, p.get("costPerHr", "?"), p.get("gpuId") or "?")' <<<"$json"
 }
+
+json_field() { python3 -c 'import sys, json; print(json.load(sys.stdin).get(sys.argv[1]) or "")' "$1"; }
 
 case "${1:-}" in
   up)
-    if existing="$(find_pod)" && [ -n "$existing" ]; then
+    : "${WS_IMAGE:?set WS_IMAGE, e.g. ghcr.io/<you>/runpod-3d-workstation:sha-abc1234, in ~/.config/ws/env}"
+    existing="$(find_pods)"
+    if [ -n "$existing" ]; then
       echo "Pod already exists. Run: ws status"
       exit 0
     fi
-    body="$(WS_NAME="$WS_NAME" WS_IMAGE="$WS_IMAGE" WS_GPUS="$WS_GPUS" WS_DISK_GB="$WS_DISK_GB" \
-            WS_CLOUD="$WS_CLOUD" WS_SPOT="$WS_SPOT" WS_DATACENTERS="$WS_DATACENTERS" \
-            WS_CUDA="$WS_CUDA" python3 -c '
-import json, os
-e = os.environ
-secret = lambda n: "{{ RUNPOD_SECRET_%s }}" % n
-filters = {}
-if e["WS_DATACENTERS"]:
-    filters["dataCenterIds"] = e["WS_DATACENTERS"].split(",")
-    filters["dataCenterPriority"] = "custom"
-if e["WS_CUDA"]:
-    filters["allowedCudaVersions"] = e["WS_CUDA"].split(",")
-print(json.dumps({
-    **filters,
-    "name": e["WS_NAME"],
-    "imageName": e["WS_IMAGE"],
-    "gpuTypeIds": e["WS_GPUS"].split(","),
-    "gpuTypePriority": "custom",
-    "gpuCount": 1,
-    "cloudType": e["WS_CLOUD"],
-    "interruptible": e["WS_SPOT"] == "true",
-    "containerDiskInGb": int(e["WS_DISK_GB"]),
-    "volumeInGb": 0,
-    "ports": ["8080/http"],
-    "env": {
-        "PASSWD": secret("desktop_password"),
-        "R2_ACCOUNT_ID": secret("r2_account_id"),
-        "R2_ACCESS_KEY_ID": secret("r2_access_key_id"),
-        "R2_SECRET_ACCESS_KEY": secret("r2_secret_access_key"),
-        "R2_BUCKET": secret("r2_bucket"),
-    },
-}))')"
-    id="$(api -X POST "$API/pods" -d "$body" | python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')"
-    echo "Created pod $id. The desktop takes a few minutes to boot."
-    echo "Run 'ws status' in a minute to see which GPU and datacenter you got."
-    echo "Desktop: https://$id-8080.proxy.runpod.net  (user: ubuntu, password: your desktop_password secret)"
+    err="$(mktemp)"
+    trap 'rm -f "$err"' EXIT
+    IFS=, read -ra gpus <<<"$WS_GPUS"
+    for gpu in "${gpus[@]}"; do
+      echo "Trying $gpu..."
+      args=(pod create --name "$WS_NAME" --image "$WS_IMAGE" --gpu-id "$gpu" --gpu-count 1
+            --cloud-type "$WS_CLOUD" --container-disk-in-gb "$WS_DISK_GB" --volume-in-gb 0
+            --ports 8080/http --ssh=false --env "$ENV_JSON")
+      if [ -n "$WS_DATACENTERS" ]; then args+=(--data-center-ids "$WS_DATACENTERS"); fi
+      if [ -n "$WS_MIN_CUDA" ]; then args+=(--min-cuda-version "$WS_MIN_CUDA"); fi
+      if [ -n "$WS_REGISTRY_AUTH_ID" ]; then args+=(--registry-auth-id "$WS_REGISTRY_AUTH_ID"); fi
+      if out="$(runpodctl "${args[@]}" 2>"$err")"; then
+        id="$(json_field id <<<"$out")"
+        echo "Created pod $id ($gpu). The desktop takes a few minutes to boot."
+        echo "Desktop: https://$id-8080.proxy.runpod.net  (user: ubuntu, password: your desktop_password secret)"
+        exit 0
+      fi
+      sed 's/^/  /' "$err" | tail -3
+      # A failed create (timeout, 5xx) can still have made a pod; never add a
+      # second one on top of it.
+      if [ -n "$(find_pods)" ]; then
+        echo "A pod was created anyway. Run: ws status"
+        exit 0
+      fi
+    done
+    echo "No pod could be created with any of: $WS_GPUS" >&2
+    echo "Try again later, or widen WS_GPUS / WS_DATACENTERS / WS_CLOUD in ~/.config/ws/env." >&2
+    exit 1
     ;;
   status)
-    p="$(find_pod)"
-    [ -n "$p" ] || { echo "No pod named $WS_NAME (nothing is billing)."; exit 0; }
-    read -r id state cost dc gpu <<<"$p"
-    echo "Pod $id  $gpu  in $dc  state=$state  \$$cost/hr"
-    echo "Desktop: https://$id-8080.proxy.runpod.net"
+    pods="$(find_pods)"
+    [ -n "$pods" ] || { echo "No pod named $WS_NAME (nothing is billing)."; exit 0; }
+    while read -r id state cost gpu; do
+      dc="$(runpodctl pod get "$id" 2>/dev/null |
+            python3 -c 'import sys, json; print((json.load(sys.stdin).get("machine") or {}).get("dataCenterId") or "?")' 2>/dev/null || echo "?")"
+      echo "Pod $id  $gpu  in $dc  state=$state  \$$cost/hr"
+      echo "Desktop: https://$id-8080.proxy.runpod.net"
+    done <<<"$pods"
+    ;;
+  logs)
+    pods="$(find_pods)"
+    [ -n "$pods" ] || { echo "No pod named $WS_NAME."; exit 0; }
+    runpodctl pod logs "${pods%% *}"
     ;;
   down)
-    p="$(find_pod)"
-    [ -n "$p" ] || { echo "No pod named $WS_NAME."; exit 0; }
-    id="${p%% *}"
-    echo "This deletes pod $id immediately. Anything changed since the last autosave"
-    echo "(every ${WS_AUTOSAVE_MINUTES:-10} min) is lost. Prefer 'Save & Terminate' on the pod's desktop."
+    pods="$(find_pods)"
+    [ -n "$pods" ] || { echo "No pod named $WS_NAME."; exit 0; }
+    echo "This deletes these pods immediately:"
+    while read -r line; do echo "  $line"; done <<<"$pods"
+    echo "Anything changed since the last autosave (every 10 min) is lost."
+    echo "Prefer 'Save & Terminate' on the pod's desktop."
     read -rp "Delete anyway? [y/N] " ok
     [ "$ok" = y ] || exit 1
-    api -X DELETE "$API/pods/$id" >/dev/null
-    echo "Deleted."
+    while read -r id _; do
+      runpodctl pod delete "$id" >/dev/null
+      echo "Deleted $id."
+    done <<<"$pods"
     ;;
   *)
-    sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
     exit 1
     ;;
 esac

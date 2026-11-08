@@ -1,0 +1,14 @@
+#!/bin/bash
+# Container entrypoint. Refuses to start when a secret is missing or wasn't
+# resolved by Runpod: Selkies would otherwise serve the desktop with the base
+# image's default password or the literal "{{ RUNPOD_SECRET_... }}" text, and
+# sync would retry forever with nothing saved.
+for v in PASSWD R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET; do
+  case "${!v:-}" in
+    "" | mypasswd | *"{{"*)
+      echo "[ws] FATAL: $v is missing or not a resolved Runpod secret; refusing to start" >&2
+      exit 1
+      ;;
+  esac
+done
+exec /etc/container-entrypoint.sh "$@"
