@@ -7,6 +7,13 @@ set -euo pipefail
 pass() { echo "PASS: $*"; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
+# --- The image ships nothing in synced dirs (restore uses --update). Checked
+# first: running Blender or Claude creates their config dirs.
+for d in "$HOME/.claude" "$HOME/.config/blender" "$HOME/.config/Epic" "$HOME/work"; do
+  [ ! -e "$d" ] || fail "$d exists in the image"
+done
+pass "synced dirs are empty in the image"
+
 # --- Tools and add-on
 claude --version >/dev/null && pass "claude runs"
 runpodctl --version >/dev/null && pass "runpodctl runs"
@@ -15,12 +22,6 @@ blender -b --python-exit-code 1 --python /usr/local/lib/blender-check-mcp.py >/d
   fail "Blender doesn't enable the MCP add-on"
 pass "blender enables the MCP add-on"
 /opt/ws/blender-mcp/bin/blender-mcp --help >/dev/null && pass "blender-mcp runs"
-
-# --- The image ships nothing in synced dirs (restore uses --update)
-for d in "$HOME/.claude" "$HOME/.config/blender" "$HOME/.config/Epic" "$HOME/work"; do
-  [ ! -e "$d" ] || fail "$d exists in the image"
-done
-pass "synced dirs are empty in the image"
 
 # --- Sync scripts against a local S3 server
 export XDG_RUNTIME_DIR; XDG_RUNTIME_DIR="$(mktemp -d)"
