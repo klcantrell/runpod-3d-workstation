@@ -14,6 +14,7 @@ uvx --version >/dev/null && pass "uvx runs"
 blender -b --python-exit-code 1 --python /usr/local/lib/blender-check-mcp.py >/dev/null 2>&1 ||
   fail "Blender doesn't enable the MCP add-on"
 pass "blender enables the MCP add-on"
+/opt/ws/blender-mcp/bin/blender-mcp --help >/dev/null && pass "blender-mcp runs"
 
 # --- The image ships nothing in synced dirs (restore uses --update)
 for d in "$HOME/.claude" "$HOME/.config/blender" "$HOME/.config/Epic" "$HOME/work"; do
@@ -47,7 +48,7 @@ ws-restore >/dev/null
 pass "restore copies work, keeps newer local files, skips credentials"
 
 ws-reconcile >/dev/null
-grep -q "mcp-for-blender@${MCP_FOR_BLENDER_VERSION}" "$CLAUDE_CONFIG_DIR/.claude.json" ||
+grep -q "/opt/ws/blender-mcp/bin/blender-mcp" "$CLAUDE_CONFIG_DIR/.claude.json" ||
   fail "ws-reconcile didn't register the MCP server"
 [ -f "$CLAUDE_CONFIG_DIR/CLAUDE.md" ] || fail "ws-reconcile didn't install CLAUDE.md"
 pass "ws-reconcile registers the MCP server and CLAUDE.md"

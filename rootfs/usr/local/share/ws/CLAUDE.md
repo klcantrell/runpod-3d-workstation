@@ -14,7 +14,9 @@ It is deleted when the user is done.
 ## Apps
 
 - **Blender**: `blender` (`/opt/blender`). The running Blender GUI is reachable
-  through the `blender` MCP server. For batch work without the GUI:
+  through the `blender` MCP server, which also searches the Blender Python API
+  and manual for this version; check there before guessing API names. For
+  batch work without the GUI:
   `blender -b file.blend --python script.py`.
 - **Isaac Sim**: install with `install-isaacsim`, then run standalone scripts
   with `~/apps/isaacsim-$ISAACSIM_VERSION/.venv/bin/python script.py`
