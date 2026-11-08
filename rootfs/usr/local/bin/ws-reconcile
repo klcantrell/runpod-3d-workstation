@@ -4,10 +4,9 @@
 # being overwritten by the synced copy.
 set -euo pipefail
 
-# Claude Code's Blender MCP server, pinned to the add-on version in this image
+# Claude Code's Blender MCP server, installed in the image with its add-on
 claude mcp remove --scope user blender >/dev/null 2>&1 || true
-claude mcp add --scope user blender -e DISABLE_TELEMETRY=true \
-  -- uvx "mcp-for-blender@${MCP_FOR_BLENDER_VERSION:?}"
+claude mcp add --scope user blender -- /opt/ws/blender-mcp/bin/blender-mcp
 
 # Default instructions for Claude; a copy the user has edited is left alone
 if [ ! -f "$CLAUDE_CONFIG_DIR/CLAUDE.md" ]; then

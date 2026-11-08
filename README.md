@@ -115,11 +115,15 @@ asked to accept NVIDIA's EULA the first time it runs.
 
 ### Claude Code
 Claude Code is installed in the image, with Blender connected through
-[MCP for Blender](https://github.com/ahujasid/mcp-for-blender) (a community
-add-on, not an official Blender project).
+[Blender MCP](https://www.blender.org/lab/mcp-server/), Blender Lab's official
+add-on and MCP server. Claude can read and change the open scene, take
+screenshots, and search the Blender Python API and manual for this version.
+It can't import assets or generate models; ask Claude to script a download
+(for example, from Poly Haven) instead.
 
-1. Open Blender. The add-on starts its connection on launch. To check it, press
-   `N` in the viewport and open the **MCP for Blender** tab.
+1. Open Blender. The add-on starts its connection on launch. To check it, open
+   **Edit > Preferences > Add-ons > MCP**, which shows whether the server is
+   running.
 2. Open a terminal and `cd ~/work`, then run `claude`.
 3. **On each new pod:** run `/login` and sign in with your org's SSO in the pod's
    browser. The login token is deliberately left out of the R2 sync. To keep
@@ -131,10 +135,11 @@ image. `~/.claude/CLAUDE.md` tells Claude about this machine: where the apps
 are, and that only `~/work` survives. Edit it as you like; delete it to get the
 image's current default on the next pod.
 
-The Blender add-on executes whatever Python the agent sends it, so only connect
-agents you trust. Anything running on the pod, including the agent, can read the
-R2 keys from the environment. Its telemetry is opt-in, and this setup also turns
-off its anonymous usage ping and its update check.
+The Blender add-on executes whatever Python the agent sends it, with no
+safeguards, so only connect agents you trust. To let it start, the image turns
+on Blender's **Allow Online Access** setting. Anything running on the pod,
+including the agent, can read the R2 keys from the environment. Blender MCP
+collects no telemetry.
 
 ## Customizing what's saved
 Edit `WS_SYNC_DIRS` and `WS_EXCLUDES` in `rootfs/usr/local/lib/ws-lib.sh`.
@@ -149,14 +154,14 @@ Other settings are `ENV` lines in the `Dockerfile`: `WS_AUTOSAVE_MINUTES` and
 
 Every version is pinned in the `Dockerfile`. Renovate opens a pull request
 (Mondays) when one has a new release: Blender, rclone, runpodctl, uv, Claude
-Code (stable channel), MCP for Blender, Isaac Sim, the base desktop image, and
+Code (stable channel), Blender MCP, Isaac Sim, the base desktop image, and
 the GitHub Actions. CI lints, builds and smoke-tests every PR.
 
 To take an update:
 1. Read the PR's release notes, check CI is green, and merge.
 2. Copy the new `sha-` tag from the build summary into `WS_IMAGE`.
 3. On the next pod, check what the smoke test can't (no GPU in CI): the
-   desktop streams, Blender opens with the MCP tab, and `claude mcp list`
+   desktop streams, Blender's MCP add-on shows its server running, and `claude mcp list`
    shows `blender` connected while Blender is open. For an Isaac Sim or Unreal
    bump, launch that too.
 4. If anything's wrong, put the previous `sha-` tag back in `WS_IMAGE`. Every
