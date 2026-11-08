@@ -22,8 +22,18 @@ ARG BLENDER_MCP_VERSION=1.0.3
 # renovate: datasource=pypi depName=isaacsim
 ARG ISAACSIM_VERSION=6.2.0.0
 
+# Rootless like the base, which hands the whole filesystem to the session user
+# (uid 1000) and runs its entrypoint and s6 services as that user: layers run
+# as uid 1000 through fakeroot, and copies are chowned to it. A real-root layer
+# leaves root-owned directories behind (a root-owned /etc/service stops s6 from
+# starting) and a root-owned package database. Setuid files are released
+# around the apt run, since dpkg can't replace one it doesn't own, and restored
+# after with real root.
 USER 0
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN selkies-privileged-files release
+USER 1000
+SHELL ["/usr/bin/fakeroot", "--", "/bin/bash", "-o", "pipefail", "-c"]
 
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -42,17 +52,20 @@ RUN curl -fsSL "https://downloads.rclone.org/v${RCLONE_VERSION}/rclone-v${RCLONE
     unzip -j /tmp/rclone.zip '*/rclone' -d /usr/local/bin && rm /tmp/rclone.zip && \
     curl -fsSL "https://github.com/runpod/runpodctl/releases/download/v${RUNPODCTL_VERSION}/runpodctl-linux-amd64" -o /usr/local/bin/runpodctl && \
     chmod 755 /usr/local/bin/rclone /usr/local/bin/runpodctl
-COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /uvx /usr/local/bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.7 --chown=1000:1000 /uv /uvx /usr/local/bin/
 
-COPY rootfs/ /
+COPY --chown=1000:1000 rootfs/ /
 RUN chmod 755 /usr/local/bin/ws-* /usr/local/bin/install-* /usr/local/bin/isaacsim /usr/local/bin/unreal \
-      /etc/service/r2-sync/run /etc/service/r2-sync/finish && \
-    chown -R 1000:1000 /etc/service/r2-sync /opt/ws
+      /etc/service/r2-sync/run /etc/service/r2-sync/finish
+
+USER 0
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN selkies-privileged-files restore
+USER 1000
 
 # Refuses to start on missing or unresolved secrets, then runs the base entrypoint
 ENTRYPOINT ["/usr/local/bin/ws-entrypoint"]
 
-USER 1000
 # SELKIES_ENABLE_HTTPS=false: Runpod's proxy terminates TLS and talks plain HTTP
 # to the pod. The MCP add-on (a system extension), and a startup script that
 # enables it, are shipped outside the synced ~/.config/blender so image
