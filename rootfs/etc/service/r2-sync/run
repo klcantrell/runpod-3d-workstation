@@ -8,6 +8,11 @@ until [ -f "${XDG_RUNTIME_DIR}/container-env" ]; do sleep 0.5; done
 # R2_* are guaranteed by ws-entrypoint; this also loads container-env.
 . /usr/local/lib/ws-lib.sh
 
+# Set before restore and reconcile, so a stop during boot still saves. Bash
+# runs it once the foreground command finishes; ws-save refuses on its own if
+# the restore hasn't completed.
+trap '/usr/local/bin/ws-save; exit 0' TERM INT
+
 # Restore once per container. s6 restarts this service if it dies, and a
 # second restore is unnecessary.
 if [ ! -f "$WS_RESTORED_MARKER" ]; then
@@ -24,7 +29,6 @@ if [ "${WS_MAX_HOURS:-0}" -gt 0 ] && [ ! -f "$WS_DEADLINE" ]; then
   echo $(( $(date +%s) + WS_MAX_HOURS * 3600 )) > "$WS_DEADLINE"
 fi
 
-trap '/usr/local/bin/ws-save; exit 0' TERM INT
 autosave=$(( ${WS_AUTOSAVE_MINUTES:-10} * 60 ))
 next_save=$(( $(date +%s) + autosave ))
 warned=""
