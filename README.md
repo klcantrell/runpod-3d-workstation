@@ -27,6 +27,51 @@ pod is deleted when you're done; your work lives in Cloudflare R2.
 Check current prices on Runpod's pricing page. Runpod is prepaid: keeping a
 modest balance with auto-pay off caps what a forgotten pod can cost.
 
+## Choosing GPUs
+
+`WS_GPUS` is a comma-separated list of Runpod GPU IDs. `ws up` tries them in
+order and takes the first one in stock (in `WS_DATACENTERS`, if set). An ID is
+the GPU's full name exactly as Runpod spells it, for example
+`NVIDIA GeForce RTX 4090`, not `RTX 4090`.
+
+To see every ID with its VRAM and secure-cloud price, run:
+```sh
+runpodctl gpu list -o yaml | grep -E 'gpuId|memoryInGb|securePricePerHr'
+```
+This shows only GPUs in stock right now; add `--include-unavailable` for the
+rest. The full reference is Runpod's [GPU types](https://docs.runpod.io/references/gpu-types) page.
+
+Not every Runpod GPU suits this workstation. Isaac Sim needs RT cores, and the
+desktop stream needs the GPU's video encoder. These are good fits:
+
+| GPU ID | VRAM | In the default list |
+| --- | --- | --- |
+| `NVIDIA GeForce RTX 4090` | 24 GB | yes |
+| `NVIDIA RTX A6000` | 48 GB | yes |
+| `NVIDIA L40S` | 48 GB | yes |
+| `NVIDIA RTX 6000 Ada Generation` | 48 GB | yes |
+| `NVIDIA GeForce RTX 5090` | 32 GB | yes |
+| `NVIDIA GeForce RTX 3090` | 24 GB | |
+| `NVIDIA RTX A5000` | 24 GB | |
+| `NVIDIA L4` | 24 GB | |
+| `NVIDIA A40` | 48 GB | |
+| `NVIDIA L40` | 48 GB | |
+| `NVIDIA RTX PRO 5000 Blackwell` | 48 GB | |
+| `NVIDIA RTX PRO 6000 Blackwell Server Edition` | 96 GB | |
+| `NVIDIA RTX PRO 6000 Blackwell Workstation Edition` | 96 GB | |
+
+Cards with 16–20 GB, such as `NVIDIA GeForce RTX 4080` or
+`NVIDIA RTX 4000 Ada Generation`, are fine for Blender but tight for Isaac Sim
+and Unreal; see NVIDIA's [Isaac Sim requirements](https://docs.isaacsim.omniverse.nvidia.com/latest/installation/requirements.html).
+
+Avoid these:
+- **A100, H100, H200, B200, B300 and V100:** compute cards without RT cores, so
+  Isaac Sim won't run. Apart from the V100, they also have no video encoder, so
+  the desktop stream falls back to the CPU.
+- **`... MIG 1g.24gb` and other MIG IDs:** a slice of a shared card, not tested
+  with this image.
+- **`AMD Instinct MI300X OAM`:** the image needs an NVIDIA GPU.
+
 ## One-time setup
 
 ### 1. Cloudflare R2
@@ -69,7 +114,7 @@ WS_IMAGE=ghcr.io/<you>/runpod-3d-workstation:sha-abc1234
 # WS_CLOUD=COMMUNITY
 # Allowed datacenters; nearer means less input lag. Full list at the top of scripts/ws.
 # WS_DATACENTERS=US-IL-1,US-KS-2
-# GPUs to try, in order (default: 4090, A6000, L40S, 6000 Ada, 5090)
+# GPUs to try, in order (default: 4090, A6000, L40S, 6000 Ada, 5090). See "Choosing GPUs".
 # WS_GPUS="NVIDIA L40S,NVIDIA RTX 6000 Ada Generation"
 # Only hosts whose driver supports at least this CUDA version (default: any)
 # WS_MIN_CUDA=12.8
@@ -186,4 +231,5 @@ shellcheck scripts/ws tests/*.sh rootfs/usr/local/lib/ws-lib.sh rootfs/usr/local
 - Pods are Linux, so you get the Unreal Editor for Linux. There's no Windows option.
 - Isaac Sim officially targets Ubuntu 22.04/24.04. This image is 26.04 (the
   desktop base requires it), running Isaac Sim through its pip wheels.
-- Isaac Sim needs an RTX GPU. `WS_GPUS` lists only RTX cards for that reason.
+- Isaac Sim needs an RTX GPU. `WS_GPUS` lists only RTX cards for that reason
+  (see [Choosing GPUs](#choosing-gpus)).
