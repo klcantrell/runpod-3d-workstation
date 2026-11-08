@@ -81,7 +81,7 @@ RUN git -c advice.detachedHead=false clone -q --depth 1 --branch "v${BLENDER_MCP
       https://projects.blender.org/lab/blender_mcp.git /tmp/blender_mcp && \
     mkdir -p /opt/ws/blender/extensions/system && \
     cp -R /tmp/blender_mcp/addon/blender_mcp_addon /opt/ws/blender/extensions/system/mcp && \
-    export UV_PYTHON_INSTALL_DIR=/opt/ws/blender-mcp/python UV_NO_CACHE=1 && \
+    export UV_PYTHON_INSTALL_DIR=/opt/ws/python UV_NO_CACHE=1 && \
     uv venv -q --python 3.12 /opt/ws/blender-mcp && \
     uv pip install -q --python /opt/ws/blender-mcp /tmp/blender_mcp/mcp && \
     rm -rf /tmp/blender_mcp && \
