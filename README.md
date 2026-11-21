@@ -158,6 +158,39 @@ The **Isaac Sim** shortcut installs the version set by `ISAACSIM_VERSION` in the
 `Dockerfile` from NVIDIA's pip index on first use, then caches it in R2. You'll be
 asked to accept NVIDIA's EULA the first time it runs.
 
+### Isaac GR00T finetuning
+`install-groot` sets up [Isaac GR00T](https://github.com/NVIDIA/Isaac-GR00T)
+N1.6 in `~/apps/Isaac-GR00T` for single-GPU finetuning, with no sudo or CUDA
+toolkit. Rerun it on each new pod (it isn't cached in R2); it takes several
+minutes and ends by checking that PyTorch sees the GPU.
+
+Create the pod with a host driver new enough for PyTorch's CUDA 12.8 build, and
+with enough VRAM. NVIDIA recommends an H100 or L40 for finetuning; the 24 GB
+cards need a smaller `--global_batch_size`. Set the GPUs for this one pod, so
+your usual list stays as it is:
+```sh
+WS_MIN_CUDA=12.8 WS_GPUS="NVIDIA H100 80GB HBM3,NVIDIA H100 NVL,NVIDIA H100 PCIe,NVIDIA L40S" ws up
+```
+H100s are fastest (SXM, then NVL, then PCIe), with the L40S as a fallback when
+none are in stock. On an H100 the desktop stream is encoded on the CPU, so it
+lags more, and Isaac Sim won't run (see [Choosing GPUs](#choosing-gpus)).
+
+This only works if `~/.config/ws/env` sets these variables in the form
+`WS_GPUS="${WS_GPUS:-...}"`, or not at all. A plain `WS_GPUS=...` line there
+replaces what you type.
+
+Then, in a terminal on the pod:
+```sh
+install-groot
+ws-extend 4    # the time limit deletes the pod even mid-training
+cd ~/apps/Isaac-GR00T && source .venv/bin/activate
+python gr00t/experiment/launch_finetune.py --num_gpus 1 --output_dir ~/apps/groot-runs/<run> ...
+```
+
+Keep datasets and checkpoints outside `~/work`, which syncs to R2, and upload
+checkpoints to Hugging Face. `source .venv/bin/activate` also puts FFmpeg 7.1
+(with the libsvtav1 encoder) on the path for re-encoding datasets.
+
 ### Claude Code
 Claude Code is installed in the image, with Blender connected through
 [Blender MCP](https://www.blender.org/lab/mcp-server/), Blender Lab's official

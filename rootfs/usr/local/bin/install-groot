@@ -1,0 +1,94 @@
+#!/bin/bash
+# Set up Isaac GR00T N1.6 for single-GPU finetuning in ~/apps/Isaac-GR00T
+# (container disk, not synced: the venv is ~10 GB). Safe to rerun.
+#
+# Needs no sudo or apt, unlike upstream's install_deps.sh:
+# - No CUDA toolkit or cuda-compat. PyTorch's cu128 wheels bring their own CUDA
+#   runtime; the host driver must support CUDA 12.8 (create the pod with
+#   WS_MIN_CUDA=12.8). nvcc is only needed for deepspeed, which GR00T uses only
+#   with more than one GPU.
+# - FFmpeg 7 shared libraries and CLI from BtbN's builds instead of apt.
+#   torchcodec 0.4 needs FFmpeg 4-7; the CLI includes libsvtav1 for re-encoding
+#   datasets. `source .venv/bin/activate` puts both on the path.
+set -euo pipefail
+
+dir="${GROOT_DIR:-$HOME/apps/Isaac-GR00T}"
+commit="${GROOT_COMMIT:-ead52833afbbf4243f8cd5e7664f48a94de03b19}"
+# BtbN's "latest" release has moved on to FFmpeg 8+; their monthly autobuilds stay up
+ffmpeg_url="https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-31-14-10/ffmpeg-n7.1.5-12-g1fdbca85aa-linux64-gpl-shared-7.1.tar.xz"
+ffmpeg_dir="$HOME/apps/ffmpeg-7.1"
+
+log() { echo "==> $*"; }
+
+cuda="$(nvidia-smi 2>/dev/null | sed -n 's/.*CUDA Version: *\([0-9.]*\).*/\1/p' | head -1 || true)"
+if [ -n "$cuda" ] && [ "$(printf '%s\n' 12.8 "$cuda" | sort -V | head -1)" != 12.8 ]; then
+  echo "WARNING: host driver supports CUDA $cuda; PyTorch here needs 12.8+." >&2
+  echo "Terminate this pod and create one with WS_MIN_CUDA=12.8." >&2
+fi
+
+if [ ! -x "$ffmpeg_dir/bin/ffmpeg" ]; then
+  log "downloading FFmpeg 7.1"
+  mkdir -p "$ffmpeg_dir"
+  curl -fsSL "$ffmpeg_url" | tar -xJ -C "$ffmpeg_dir" --strip-components=1
+fi
+
+if [ ! -d "$dir/.git" ]; then
+  log "cloning Isaac-GR00T"
+  # No submodules: they're the simulation benchmarks, not needed to finetune
+  git clone -q https://github.com/NVIDIA/Isaac-GR00T.git "$dir"
+fi
+cd "$dir"
+if [ "$(git rev-parse HEAD)" != "$commit" ]; then
+  git fetch -q origin "$commit" 2>/dev/null || true
+  git -c advice.detachedHead=false checkout -q "$commit"
+fi
+
+log "installing Python packages (first time takes several minutes)"
+# 3.10 matches the flash-attn wheel upstream pins and the Ubuntu 22.04 setups
+# GR00T is tested on
+UV_PYTHON=3.10 uv sync
+uv pip install -q -e .
+
+# Puts FFmpeg on the path whenever the venv is activated
+if ! grep -q "$ffmpeg_dir" .venv/bin/activate; then
+  cat >>.venv/bin/activate <<EOF
+
+# Added by install-groot: FFmpeg 7 for torchcodec and dataset re-encoding
+export PATH="$ffmpeg_dir/bin:\$PATH"
+export LD_LIBRARY_PATH="$ffmpeg_dir/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
+EOF
+fi
+
+log "checking the install"
+# shellcheck disable=SC1091
+. .venv/bin/activate
+python - <<'EOF'
+import torch
+assert torch.cuda.is_available(), "PyTorch can't see the GPU"
+print(f"PyTorch {torch.__version__}, CUDA {torch.version.cuda}, {torch.cuda.get_device_name(0)}, "
+      f"{torch.cuda.get_device_properties(0).total_memory / 2**30:.0f} GB")
+import torchcodec.decoders  # loads FFmpeg; fails if it isn't found
+import flash_attn
+from gr00t.data.embodiment_tags import EmbodimentTag
+print("torchcodec, flash-attn and GR00T import OK")
+EOF
+if ffmpeg -hide_banner -encoders 2>/dev/null | grep libsvtav1 >/dev/null; then
+  echo "ffmpeg has the libsvtav1 encoder"
+else
+  echo "WARNING: ffmpeg has no libsvtav1 encoder; AV1 re-encoding won't work" >&2
+fi
+
+cat <<EOF
+
+GR00T is ready. In each new terminal:
+  cd $dir && source .venv/bin/activate
+
+Then finetune as on Brev, e.g.:
+  python gr00t/experiment/launch_finetune.py --base_model_path nvidia/GR00T-N1.6-3B \\
+    --dataset_path <dataset> --modality_config_path examples/SO100/so100_config.py \\
+    --embodiment_tag NEW_EMBODIMENT --num_gpus 1 --output_dir ~/apps/groot-runs/<run>
+
+Keep datasets and checkpoints outside ~/work (it syncs to R2) and upload
+checkpoints to Hugging Face. The pod deletes itself at its time limit, training
+or not: run 'ws-extend <hours>' before a long run.
+EOF

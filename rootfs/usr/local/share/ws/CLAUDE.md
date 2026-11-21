@@ -23,5 +23,9 @@ It is deleted when the user is done.
   (`from isaacsim import SimulationApp` first). `isaacsim` opens the GUI.
 - **Unreal Engine**: `unreal` opens the editor (`~/apps/unreal`). Python
   scripting requires enabling the Python Editor Script Plugin in the project.
+- **Isaac GR00T N1.6**: install with `install-groot`, then
+  `cd ~/apps/Isaac-GR00T && source .venv/bin/activate`. Finetune with
+  `python gr00t/experiment/launch_finetune.py ...`; keep datasets and
+  checkpoints outside `~/work` so they aren't synced to R2.
 
 Display is `:20`; GUI apps launched from a shell appear on the user's desktop.
