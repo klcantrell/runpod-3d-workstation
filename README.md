@@ -67,7 +67,9 @@ and Unreal; see NVIDIA's [Isaac Sim requirements](https://docs.isaacsim.omnivers
 Avoid these:
 - **A100, H100, H200, B200, B300 and V100:** compute cards without RT cores, so
   Isaac Sim won't run. Apart from the V100, they also have no video encoder, so
-  the desktop stream falls back to the CPU.
+  the desktop stream falls back to the CPU, and on an H100 the desktop came up
+  black. For CUDA work on them, use the pod over SSH instead (see
+  [SSH-only pods](#ssh-only-pods)).
 - **`... MIG 1g.24gb` and other MIG IDs:** a slice of a shared card, not tested
   with this image.
 - **`AMD Instinct MI300X OAM`:** the image needs an NVIDIA GPU.
@@ -129,7 +131,7 @@ ln -s "$PWD/scripts/ws" /usr/local/bin/ws   # or add scripts/ to PATH
 ```sh
 ws up       # prints https://<pod>-8080.proxy.runpod.net, then notifies you when it's up
 ws wait     # wait for the desktop again (e.g. after Ctrl-C) and notify
-ws status   # GPU, datacenter, $/hr, URL. Is anything running (and costing money)?
+ws status   # GPU, datacenter, $/hr, URL, and any other pods. Is anything costing money?
 ws logs     # container log, e.g. if the desktop never comes up
 ```
 
@@ -147,6 +149,32 @@ billing, so run `ws down`.
 If an autosave or the boot restore fails, you get a desktop notification that
 stays until dismissed. Run `ws-save` (or `ws-restore`) in a terminal to see the
 error.
+
+### SSH-only pods
+For work that needs a big GPU but no desktop, such as training on an H100, put
+the settings for that kind of pod in a profile, `~/.config/ws/<profile>.env`.
+It's read after `~/.config/ws/env`, and the pod is named after the profile:
+```sh
+cat > ~/.config/ws/train.env <<'EOF'
+WS_GPUS="NVIDIA H100 80GB HBM3,NVIDIA H100 NVL,NVIDIA H100 PCIe,NVIDIA L40S"
+WS_MIN_CUDA=12.8
+WS_SSH=true
+# Hours until the pod saves and deletes itself (default 8; 0 = never)
+WS_MAX_HOURS=12
+EOF
+
+ws -p train up       # creates a pod named "train" and notifies you when SSH answers
+ws -p train ssh      # log in as ubuntu; extra arguments go to ssh
+ws -p train status   # every ws command takes -p; plain ws status also lists this pod
+```
+
+`WS_SSH=true` exposes port 22 and has Runpod pass your account's SSH keys to the
+pod; `ws ssh` uses the key `runpodctl doctor` registered. The pod only accepts
+key logins. Its desktop still starts, but nothing waits for it.
+
+Over SSH you don't see desktop notifications. The login message says when the
+pod will save and delete itself; run `ws-extend` to keep it longer, `ws-save`
+to save, and `ws-save-and-terminate` when you're done.
 
 `ws down` deletes the pod from your Mac without a final save (you could lose up
 to 10 minutes of work). Use it only if the desktop is unreachable.
@@ -171,20 +199,11 @@ minutes and ends by checking that PyTorch sees the GPU.
 
 Create the pod with a host driver new enough for PyTorch's CUDA 12.8 build, and
 with enough VRAM. NVIDIA recommends an H100 or L40 for finetuning; the 24 GB
-cards need a smaller `--global_batch_size`. Set the GPUs for this one pod, so
-your usual list stays as it is:
-```sh
-WS_MIN_CUDA=12.8 WS_GPUS="NVIDIA H100 80GB HBM3,NVIDIA H100 NVL,NVIDIA H100 PCIe,NVIDIA L40S" ws up
-```
-H100s are fastest (SXM, then NVL, then PCIe), with the L40S as a fallback when
-none are in stock. On an H100 the desktop stream is encoded on the CPU, so it
-lags more, and Isaac Sim won't run (see [Choosing GPUs](#choosing-gpus)).
+cards need a smaller `--global_batch_size`. The `train` profile in
+[SSH-only pods](#ssh-only-pods) does this: H100s are fastest (SXM, then NVL,
+then PCIe), with the L40S as a fallback when none are in stock.
 
-This only works if `~/.config/ws/env` sets these variables in the form
-`WS_GPUS="${WS_GPUS:-...}"`, or not at all. A plain `WS_GPUS=...` line there
-replaces what you type.
-
-Then, in a terminal on the pod:
+Then, over `ws -p train ssh`:
 ```sh
 install-groot
 ws-extend 4    # the time limit deletes the pod even mid-training

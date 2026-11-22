@@ -20,7 +20,8 @@ jobs:
       # shellcheck is preinstalled on GitHub's Ubuntu runners
       - run: |
           shellcheck scripts/ws tests/*.sh rootfs/usr/local/lib/ws-lib.sh \
-            rootfs/usr/local/bin/* rootfs/etc/service/r2-sync/*
+            rootfs/usr/local/bin/* rootfs/etc/service/*/* \
+            rootfs/etc/profile.d/ws-ssh.sh
 
   image:
     needs: shellcheck

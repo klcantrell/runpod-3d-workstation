@@ -1,0 +1,51 @@
+#!/bin/bash
+# SSH login as ubuntu with the keys Runpod passes in PUBLIC_KEY (your account's
+# SSH keys; ws up asks for them when WS_SSH=true). No key, no sshd. Runs as
+# ubuntu like everything else here, so it can only log in that user, and only
+# with a key.
+XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/runtime-ubuntu}"
+until [ -f "${XDG_RUNTIME_DIR}/container-env" ]; do sleep 0.5; done
+# shellcheck disable=SC1091  # written by container-entrypoint.sh at startup
+. "${XDG_RUNTIME_DIR}/container-env"
+
+if [ -z "${PUBLIC_KEY:-}" ]; then
+  echo "[sshd] PUBLIC_KEY is not set; not starting sshd"
+  # Up once, so s6 doesn't restart this every few seconds
+  exec s6-svc -O .
+fi
+
+mkdir -p "$HOME/.ssh"
+chmod 700 "$HOME/.ssh"
+printf '%s\n' "$PUBLIC_KEY" > "$HOME/.ssh/authorized_keys"
+chmod 600 "$HOME/.ssh/authorized_keys"
+
+# SSH sessions don't inherit the pod's env (R2 secrets, RUNPOD_*), which the
+# ws-* scripts and runpodctl need; sshd reads this file into every session.
+# Values with a newline can't be written in this format, so they're skipped.
+while IFS= read -r -d '' kv; do
+  case "$kv" in
+    *$'\n'* | PWD=* | OLDPWD=* | SHLVL=* | _=* | HOME=* | TERM=* | PUBLIC_KEY=*) ;;
+    *) printf '%s\n' "$kv" ;;
+  esac
+done < <(env -0) > "$HOME/.ssh/environment"
+chmod 600 "$HOME/.ssh/environment"
+
+# A host key per pod, not one baked into the image and shared by every pod
+dir="${XDG_RUNTIME_DIR}/sshd"
+mkdir -p "$dir"
+[ -f "$dir/host_ed25519" ] || ssh-keygen -q -t ed25519 -N '' -f "$dir/host_ed25519"
+cat > "$dir/sshd_config" <<EOF
+Port 22
+HostKey $dir/host_ed25519
+PidFile $dir/sshd.pid
+AuthorizedKeysFile .ssh/authorized_keys
+AllowUsers $(id -un)
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+UsePAM no
+PermitUserEnvironment yes
+PrintMotd no
+Subsystem sftp internal-sftp
+EOF
+exec /usr/sbin/sshd -D -e -f "$dir/sshd_config"

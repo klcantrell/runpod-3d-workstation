@@ -1,19 +1,40 @@
 #!/bin/bash
 # Manage the ephemeral 3D workstation pod from your Mac.
 #
-#   ws up       create the pod, then wait for its desktop (as ws wait)
-#   ws wait     wait for the desktop to answer and send a notification
-#   ws status   show the pod, its cost, and its URL
-#   ws logs     show the pod's container log (e.g. why the desktop didn't start)
-#   ws down     delete the pod (prefer "Save & Terminate" on the pod's desktop)
+#   ws [-p profile] <command>
+#
+#   up       create the pod, then wait for its desktop, or its SSH (as wait)
+#   wait     wait for the desktop (or SSH, with WS_SSH=true) and notify
+#   ssh      log in to the pod over SSH (WS_SSH=true); extra args go to ssh
+#   status   show the pod, its cost, and how to reach it, plus any other pods
+#   logs     show the pod's container log (e.g. why the desktop didn't start)
+#   down     delete the pod (prefer "Save & Terminate" on the pod's desktop)
 #
 # Needs runpodctl v3 (brew install runpod/runpodctl/runpodctl), signed in with
 # 'runpodctl doctor' or given RUNPOD_API_KEY. Settings below can be overridden
-# in ~/.config/ws/env.
+# in ~/.config/ws/env. A profile (-p) reads ~/.config/ws/<profile>.env after
+# that, for a second kind of pod, e.g. an H100 used over SSH; its pod is named
+# after the profile unless that file sets WS_NAME.
 set -euo pipefail
 
 # shellcheck disable=SC1091
 [ -f "$HOME/.config/ws/env" ] && . "$HOME/.config/ws/env"
+profile=""
+if [ "${1:-}" = -p ]; then
+  profile="${2:-}"
+  case "$profile" in
+    "" | *[!A-Za-z0-9_-]*) echo "usage: ws -p <profile> <command> (letters, digits, - and _)" >&2; exit 1 ;;
+  esac
+  [ -f "$HOME/.config/ws/$profile.env" ] || { echo "No profile file ~/.config/ws/$profile.env" >&2; exit 1; }
+  shift 2
+  # Never the default pod's name, or ws status and down would act on that pod
+  unset WS_NAME
+  # shellcheck disable=SC1090
+  . "$HOME/.config/ws/$profile.env"
+  WS_NAME="${WS_NAME:-$profile}"
+fi
+# How to run ws again for this pod, for messages
+WS_CMD="ws${profile:+ -p $profile}"
 command -v runpodctl >/dev/null || { echo "runpodctl not found: brew install runpod/runpodctl/runpodctl" >&2; exit 1; }
 if [ -n "${RUNPOD_API_KEY:-}" ]; then export RUNPOD_API_KEY; fi
 # Never stop at runpodctl's interactive "newer version available" prompt
@@ -33,6 +54,12 @@ WS_DATACENTERS="${WS_DATACENTERS:-}"
 WS_MIN_CUDA="${WS_MIN_CUDA:-}"
 # Only needed if the GHCR package is private (Runpod > Container Registry Auth)
 WS_REGISTRY_AUTH_ID="${WS_REGISTRY_AUTH_ID:-}"
+# true: also expose SSH (port 22), log in with 'ws ssh', and have up/wait wait
+# for SSH rather than the desktop. Runpod passes your account's SSH keys to the
+# pod; 'runpodctl doctor' registers the key ws ssh uses.
+WS_SSH="${WS_SSH:-false}"
+# Hours until the pod saves and deletes itself (0 = never); empty = the image's 8
+WS_MAX_HOURS="${WS_MAX_HOURS:-}"
 
 # Secrets are resolved by Runpod when the pod starts. The image refuses to start
 # if one isn't (ws logs shows which).
@@ -43,6 +70,12 @@ ENV_JSON='{
   "R2_SECRET_ACCESS_KEY": "{{ RUNPOD_SECRET_r2_secret_access_key }}",
   "R2_BUCKET": "{{ RUNPOD_SECRET_r2_bucket }}"
 }'
+if [ -n "$WS_MAX_HOURS" ]; then
+  case "$WS_MAX_HOURS" in
+    *[!0-9]*) echo "WS_MAX_HOURS must be a whole number of hours" >&2; exit 1 ;;
+  esac
+  ENV_JSON="${ENV_JSON%\}}, \"WS_MAX_HOURS\": \"$WS_MAX_HOURS\"}"
+fi
 
 # Prints one line per pod named WS_NAME: id status cost_per_hr gpu (gpu last;
 # it has spaces). Fails, rather than printing nothing, if the API call fails.
@@ -57,18 +90,51 @@ for p in json.load(sys.stdin) or []:
         print(p["id"], status, p.get("costPerHr", "?"), p.get("gpuId") or "?")' <<<"$json"
 }
 
-# Polls the pod's desktop until it answers, then notifies. The proxy answers 502
-# (or 404) until Selkies is listening; Selkies then answers 401 (basic auth).
-wait_for_desktop() {
-  local id="$1" url="https://$1-8080.proxy.runpod.net" deadline code pods
+# Prints "ip port key" for the pod's public SSH port, nothing until Runpod has
+# mapped one. key is runpodctl's key file, empty if it has none.
+ssh_addr() {
+  runpodctl ssh info "$1" 2>/dev/null | python3 -c '
+import sys, json
+try:
+    c = json.load(sys.stdin)
+except ValueError:
+    sys.exit()
+if c.get("ip") and c.get("port"):
+    k = c.get("ssh_key") or {}
+    print(c["ip"], c["port"], k.get("path", "") if k.get("exists") else "")' || true
+}
+
+# The proxy answers 502 (or 404) until Selkies is listening; Selkies then
+# answers 401 (basic auth).
+desktop_up() {
+  local code
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://$1-8080.proxy.runpod.net/" || true)"
+  [ "$code" = 401 ] || [ "$code" = 200 ]
+}
+
+# The port is mapped minutes before sshd answers, so wait for its banner
+ssh_up() {
+  local ip port _
+  read -r ip port _ <<<"$(ssh_addr "$1")"
+  [ -n "${port:-}" ] && [ "$(nc -w 5 "$ip" "$port" </dev/null 2>/dev/null | head -c 4)" = SSH- ]
+}
+
+# Polls until the pod's desktop (or SSH, with WS_SSH=true) answers, then notifies
+wait_for_pod() {
+  local id="$1" what="desktop" check=desktop_up deadline pods
+  if [ "$WS_SSH" = true ]; then what="SSH"; check=ssh_up; fi
   deadline=$(( $(date +%s) + ${WS_WAIT_MINUTES:-30} * 60 ))
-  echo "Waiting for the desktop at $url (Ctrl-C stops waiting; the pod keeps booting)..."
+  echo "Waiting for the $what on pod $id (Ctrl-C stops waiting; the pod keeps booting)..."
   while :; do
-    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$url/" || true)"
-    if [ "$code" = 401 ] || [ "$code" = 200 ]; then
-      echo "Desktop is up: $url"
-      echo "Wait for its Restore complete notification before opening Blender or Claude Code."
-      notify "Desktop is up on pod $id. Wait for Restore complete before opening Blender."
+    if "$check" "$id"; then
+      if [ "$WS_SSH" = true ]; then
+        echo "SSH is up. Log in with: $WS_CMD ssh"
+        notify "SSH is up on pod $id ($WS_NAME)."
+      else
+        echo "Desktop is up: https://$id-8080.proxy.runpod.net"
+        echo "Wait for its Restore complete notification before opening Blender or Claude Code."
+        notify "Desktop is up on pod $id. Wait for Restore complete before opening Blender."
+      fi
       return 0
     fi
     # A failed API call isn't a missing pod; keep waiting
@@ -78,8 +144,8 @@ wait_for_desktop() {
       return 1
     fi
     if [ "$(date +%s)" -ge "$deadline" ]; then
-      echo "Desktop still not up after ${WS_WAIT_MINUTES:-30} minutes (last HTTP $code). See: ws logs" >&2
-      notify "Desktop still not up on pod $id. See ws logs."
+      echo "The $what is still not up after ${WS_WAIT_MINUTES:-30} minutes. See: $WS_CMD logs" >&2
+      notify "The $what is still not up on pod $id. See $WS_CMD logs."
       return 1
     fi
     sleep 10
@@ -102,32 +168,35 @@ case "${1:-}" in
     : "${WS_IMAGE:?set WS_IMAGE, e.g. ghcr.io/<you>/runpod-3d-workstation:sha-abc1234, in ~/.config/ws/env}"
     existing="$(find_pods)"
     if [ -n "$existing" ]; then
-      echo "Pod already exists. Run: ws status"
+      echo "Pod already exists. Run: $WS_CMD status"
       exit 0
     fi
     err="$(mktemp)"
     trap 'rm -f "$err"' EXIT
+    ports=8080/http ssh_flag=--ssh=false
+    if [ "$WS_SSH" = true ]; then ports=8080/http,22/tcp ssh_flag=--ssh; fi
     IFS=, read -ra gpus <<<"$WS_GPUS"
     for gpu in "${gpus[@]}"; do
       echo "Trying $gpu..."
       args=(pod create --name "$WS_NAME" --image "$WS_IMAGE" --gpu-id "$gpu" --gpu-count 1
             --cloud-type "$WS_CLOUD" --container-disk-in-gb "$WS_DISK_GB" --volume-in-gb 0
-            --ports 8080/http --ssh=false --env "$ENV_JSON")
+            --ports "$ports" "$ssh_flag" --env "$ENV_JSON")
       if [ -n "$WS_DATACENTERS" ]; then args+=(--data-center-ids "$WS_DATACENTERS"); fi
       if [ -n "$WS_MIN_CUDA" ]; then args+=(--min-cuda-version "$WS_MIN_CUDA"); fi
       if [ -n "$WS_REGISTRY_AUTH_ID" ]; then args+=(--registry-auth-id "$WS_REGISTRY_AUTH_ID"); fi
       if out="$(runpodctl "${args[@]}" 2>"$err")"; then
         id="$(json_field id <<<"$out")"
-        echo "Created pod $id ($gpu). The desktop takes a few minutes to boot."
+        echo "Created pod $id ($gpu), named $WS_NAME. It takes a few minutes to boot."
         echo "Desktop: https://$id-8080.proxy.runpod.net  (user: ubuntu, password: your desktop_password secret)"
-        wait_for_desktop "$id"
+        if [ "$WS_SSH" = true ]; then echo "SSH: $WS_CMD ssh"; fi
+        wait_for_pod "$id"
         exit
       fi
       sed 's/^/  /' "$err" | tail -3
       # A failed create (timeout, 5xx) can still have made a pod; never add a
       # second one on top of it.
       if [ -n "$(find_pods)" ]; then
-        echo "A pod was created anyway. Run: ws status"
+        echo "A pod was created anyway. Run: $WS_CMD status"
         exit 0
       fi
     done
@@ -137,18 +206,45 @@ case "${1:-}" in
     ;;
   status)
     pods="$(find_pods)"
-    [ -n "$pods" ] || { echo "No pod named $WS_NAME (nothing is billing)."; exit 0; }
+    if [ -z "$pods" ]; then
+      echo "No pod named $WS_NAME."
+    fi
     while read -r id state cost gpu; do
+      [ -n "$id" ] || continue
       dc="$(runpodctl pod get "$id" 2>/dev/null |
             python3 -c 'import sys, json; print((json.load(sys.stdin).get("machine") or {}).get("dataCenterId") or "?")' 2>/dev/null || echo "?")"
       echo "Pod $id  $gpu  in $dc  state=$state  \$$cost/hr"
       echo "Desktop: https://$id-8080.proxy.runpod.net"
+      if [ -n "$(ssh_addr "$id")" ]; then echo "SSH: $WS_CMD ssh"; fi
     done <<<"$pods"
+    # Another profile's pod (or anything else) bills too; don't let it hide
+    runpodctl pod list --all | WS_NAME="$WS_NAME" python3 -c '
+import sys, json, os
+others = [p for p in json.load(sys.stdin) or [] if p.get("name") != os.environ["WS_NAME"]]
+if others:
+    print("Other pods on your account:")
+for p in others:
+    status = p.get("runtimeStatus") or p.get("desiredStatus") or "?"
+    print("  %s (%s)  %s  state=%s  $%s/hr" % (p.get("name") or "?", p["id"], p.get("gpuId") or "?", status, p.get("costPerHr", "?")))
+if not others and not sys.argv[1]:
+    print("Nothing is billing.")' "$pods"
     ;;
   wait)
     pods="$(find_pods)"
-    [ -n "$pods" ] || { echo "No pod named $WS_NAME. Run: ws up"; exit 1; }
-    wait_for_desktop "${pods%% *}"
+    [ -n "$pods" ] || { echo "No pod named $WS_NAME. Run: $WS_CMD up"; exit 1; }
+    wait_for_pod "${pods%% *}"
+    ;;
+  ssh)
+    pods="$(find_pods)"
+    [ -n "$pods" ] || { echo "No pod named $WS_NAME. Run: $WS_CMD up"; exit 1; }
+    id="${pods%% *}"
+    read -r ip port key <<<"$(ssh_addr "$id")" || true
+    [ -n "${port:-}" ] || { echo "Pod $id has no SSH port (yet). It needs WS_SSH=true when created; see $WS_CMD status" >&2; exit 1; }
+    # Keyed by pod ID, not ip:port, which Runpod reuses for other pods
+    args=(-p "$port" -o HostKeyAlias="runpod-$id" -o StrictHostKeyChecking=accept-new
+          -o UserKnownHostsFile="$HOME/.config/ws/known_hosts")
+    if [ -n "${key:-}" ]; then args+=(-i "$key"); fi
+    exec ssh "${args[@]}" "ubuntu@$ip" "${@:2}"
     ;;
   logs)
     pods="$(find_pods)"
@@ -170,7 +266,7 @@ case "${1:-}" in
     done <<<"$pods"
     ;;
   *)
-    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+    awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"
     exit 1
     ;;
 esac

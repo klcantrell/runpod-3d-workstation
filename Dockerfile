@@ -35,11 +35,13 @@ RUN selkies-privileged-files release
 USER 1000
 SHELL ["/usr/bin/fakeroot", "--", "/bin/bash", "-o", "pipefail", "-c"]
 
+# openssh-server for the sshd service, which makes a host key per pod: the
+# package's own keys would be shared by every pod, so they're removed.
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        curl ca-certificates git unzip zstd xz-utils libnotify-bin \
+        curl ca-certificates git unzip zstd xz-utils libnotify-bin openssh-server \
         libxi6 libxkbcommon0 libsm6 libxxf86vm1 libgl1 libegl1 libvulkan1 && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+    apt-get clean && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_*
 
 # Blender
 RUN mkdir -p /opt/blender && \
@@ -56,7 +58,8 @@ COPY --from=ghcr.io/astral-sh/uv:0.13.7 --chown=1000:1000 /uv /uvx /usr/local/bi
 
 COPY --chown=1000:1000 rootfs/ /
 RUN chmod 755 /usr/local/bin/ws-* /usr/local/bin/install-* /usr/local/bin/isaacsim /usr/local/bin/unreal \
-      /etc/service/r2-sync/run /etc/service/r2-sync/finish
+      /etc/service/r2-sync/run /etc/service/r2-sync/finish \
+      /etc/service/sshd/run /etc/service/sshd/finish
 
 USER 0
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]

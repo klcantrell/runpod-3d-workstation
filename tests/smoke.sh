@@ -3,8 +3,9 @@
 #   tests/smoke.sh <image>
 # 1. ws-entrypoint refuses to start with missing or unresolved secrets
 # 2. tests/in-image.sh: tools, add-on, and sync scripts
-# 3. a full boot: services start, the desktop answers over plain HTTP, the
-#    r2-sync service restores, and a final save happens on docker stop
+# 3. a full boot: services start, the desktop answers over plain HTTP, sshd
+#    takes a key login with the pod's env, the r2-sync service restores, and a
+#    final save happens on docker stop
 # No GPU, so this can't check streaming, Vulkan, Isaac Sim or Unreal.
 set -euo pipefail
 image="${1:?usage: tests/smoke.sh <image>}"
@@ -35,11 +36,14 @@ pass "entrypoint refuses missing and unresolved secrets"
 docker run --rm --entrypoint bash -v "$here:/tests:ro" "$image" /tests/in-image.sh
 
 # --- 3. Full boot
+key="$(mktemp -d)/key"
+ssh-keygen -q -t ed25519 -N '' -f "$key"
 docker network create "$net" >/dev/null
 docker run -d --name "$net-s3" --network "$net" --entrypoint bash "$image" \
   -c 'mkdir -p /tmp/s3/bucket/work && echo restored > /tmp/s3/bucket/work/hello.txt &&
       exec rclone serve s3 /tmp/s3 --addr 0.0.0.0:9000' >/dev/null
-docker run -d --name "$net-pod" --network "$net" "${good_env[@]}" "$image" >/dev/null
+docker run -d --name "$net-pod" --network "$net" "${good_env[@]}" \
+  -e PUBLIC_KEY="$(cat "$key.pub")" "$image" >/dev/null
 
 on_pod() { docker exec "$net-pod" bash -c "$1"; }
 for _ in $(seq 1 60); do
@@ -61,6 +65,25 @@ done
 code="$(on_pod 'curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/')"
 [ "$code" = 401 ] || fail "desktop answered without a password (got $code)"
 pass "desktop serves plain HTTP on 8080 behind basic auth"
+
+# From inside the pod, so this needs no published port. R2_BUCKET shows the
+# session got the pod's env, which the ws-* scripts need.
+ssh_pod() {
+  docker exec -i "$net-pod" bash -c 'k="$(mktemp)"; cat > "$k"; chmod 600 "$k"
+    ssh -i "$k" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+      -o BatchMode=yes -o LogLevel=ERROR ubuntu@127.0.0.1 "$0"' "$1" < "$key"
+}
+for _ in $(seq 1 20); do
+  # shellcheck disable=SC2016  # expanded in the SSH session, on purpose
+  out="$(ssh_pod 'echo "$R2_BUCKET"' 2>&1)" && break
+  sleep 3
+done
+[ "$out" = bucket ] || { docker logs "$net-pod" | grep -i ssh | tail -20; fail "ssh login failed or lost the pod's env: $out"; }
+if docker exec "$net-pod" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+     -o BatchMode=yes -o PubkeyAuthentication=no ubuntu@127.0.0.1 true 2>/dev/null; then
+  fail "ssh let a login in without a key"
+fi
+pass "sshd takes key logins only, with the pod's env"
 
 on_pod 'echo "written before stop" > ~/work/final.txt'
 docker stop -t 60 "$net-pod" >/dev/null
