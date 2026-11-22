@@ -127,6 +127,9 @@ chmod 600 ~/.config/ws/env
 ln -s "$PWD/scripts/ws" /usr/local/bin/ws   # or add scripts/ to PATH
 ```
 
+For a second kind of pod, such as an H100 used over SSH, you can add a profile
+later; see [SSH-only pods](#ssh-only-pods).
+
 ## Daily use
 
 ```sh
