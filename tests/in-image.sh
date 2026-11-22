@@ -22,6 +22,9 @@ blender -b --python-exit-code 1 --python /usr/local/lib/blender-check-mcp.py >/d
   fail "Blender doesn't enable the MCP add-on"
 pass "blender enables the MCP add-on"
 /opt/ws/blender-mcp/bin/blender-mcp --help >/dev/null && pass "blender-mcp runs"
+[ -f "/usr/share/ghostty/themes/Catppuccin Mocha" ] || fail "Ghostty's Catppuccin Mocha theme is missing"
+ghostty +validate-config >/dev/null || fail "Ghostty rejects its config"
+pass "ghostty has its theme and a valid config"
 
 # --- Sync scripts against a local S3 server
 export XDG_RUNTIME_DIR; XDG_RUNTIME_DIR="$(mktemp -d)"

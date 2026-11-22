@@ -3,7 +3,8 @@
 A throwaway GPU desktop on Runpod for Blender, Unreal Engine, and Isaac Sim. The
 pod is deleted when you're done; your work lives in Cloudflare R2.
 
-- **Desktop:** KDE in your browser (Selkies), on port 8080 through Runpod's proxy.
+- **Desktop:** KDE in your browser (Selkies), on port 8080 through Runpod's proxy,
+  with the Ghostty terminal (Catppuccin Mocha theme) next to KDE's own.
 - **Blender** is in the image. **Isaac Sim** and **Unreal** install on first
   launch and are cached in R2, so later pods restore them quickly.
 - **Your work** (`~/work`, plus Blender, Unreal and Claude Code settings) is
