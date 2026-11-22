@@ -26,7 +26,7 @@ pass "blender enables the MCP add-on"
 ghostty +validate-config >/dev/null || fail "Ghostty rejects its config"
 pass "ghostty has its theme and a valid config"
 tmux -V >/dev/null && pass "tmux runs"
-fc-list | grep -q "CaskaydiaCove Nerd Font" || fail "CaskaydiaCove Nerd Font isn't installed"
+[ -n "$(fc-list "CaskaydiaCove Nerd Font")" ] || fail "CaskaydiaCove Nerd Font isn't installed"
 pass "CaskaydiaCove Nerd Font is installed"
 
 # --- Editors with the dotfiles' settings

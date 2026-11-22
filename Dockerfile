@@ -109,7 +109,7 @@ RUN --mount=type=secret,id=github_token,uid=1000 \
     tar -xJf /tmp/CascadiaCode.tar.xz -C /usr/local/share/fonts/caskaydia-cove --wildcards 'CaskaydiaCoveNerdFont-*.ttf' && \
     rm /tmp/CascadiaCode.tar.xz && \
     fc-cache -f /usr/local/share/fonts/caskaydia-cove && \
-    fc-list | grep -q "CaskaydiaCove Nerd Font"
+    [ -n "$(fc-list "CaskaydiaCove Nerd Font")" ]
 
 COPY --chown=1000:1000 rootfs/ /
 RUN chmod 755 /usr/local/bin/ws-* /usr/local/bin/install-* /usr/local/bin/isaacsim /usr/local/bin/unreal \
