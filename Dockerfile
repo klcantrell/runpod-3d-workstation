@@ -65,7 +65,8 @@ RUN apt-get update && \
 
 # VS Code from Microsoft's apt repository, its key checked against the
 # fingerprint Microsoft publishes; the package is told not to add a second
-# copy of the repository. Its desktop entries go through /usr/local/bin/code,
+# copy of the repository. Its desktop entries (found through dpkg, since their
+# names follow Microsoft's product config) go through /usr/local/bin/code,
 # which drops Electron's sandbox only where the container denies it. The
 # sandbox helper loses its setuid bit: under fakeroot it would be setuid to
 # the session user, which Electron refuses.
@@ -78,8 +79,12 @@ RUN fetch-verified key https://packages.microsoft.com/keys/microsoft.asc \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends code && \
     apt-get clean && rm -rf /var/lib/apt/lists/* && \
     chmod 755 /usr/share/code/chrome-sandbox && \
-    sed -i 's#/usr/share/code/code#/usr/local/bin/code#g' /usr/share/applications/code*.desktop && \
-    grep -q /usr/local/bin/code /usr/share/applications/code.desktop
+    desktop="$(dpkg -L code | grep '^/usr/share/applications/.*\.desktop$')" && \
+    [ -n "$desktop" ] && \
+    for f in $desktop; do \
+      sed -i 's#/usr/share/code/code#/usr/local/bin/code#g' "$f" && \
+      grep -q /usr/local/bin/code "$f" || exit 1; \
+    done
 
 # Blender
 RUN mkdir -p /opt/blender && \
