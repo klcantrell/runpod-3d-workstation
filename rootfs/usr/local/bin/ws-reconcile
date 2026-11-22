@@ -8,6 +8,27 @@ set -euo pipefail
 claude mcp remove --scope user blender >/dev/null 2>&1 || true
 claude mcp add --scope user blender -- /opt/ws/blender-mcp/bin/blender-mcp
 
+# The user's Claude Code settings from their dotfiles (copied into the image
+# at build): each key they set replaces the same key in the synced
+# settings.json, so the dotfiles stay the source; keys they don't set, such as
+# ones Claude Code saves itself, are kept.
+python3 - "$CLAUDE_CONFIG_DIR/settings.json" /usr/local/share/ws/claude-settings.json <<'EOF'
+import json, os, sys
+dst, src = sys.argv[1], sys.argv[2]
+try:
+    with open(dst) as f:
+        settings = json.load(f)
+except FileNotFoundError:
+    settings = {}
+with open(src) as f:
+    settings.update(json.load(f))
+os.makedirs(os.path.dirname(dst), exist_ok=True)
+with open(dst + ".tmp", "w") as f:
+    json.dump(settings, f, indent=2)
+    f.write("\n")
+os.replace(dst + ".tmp", dst)
+EOF
+
 # Default instructions for Claude; a copy the user has edited is left alone
 if [ ! -f "$CLAUDE_CONFIG_DIR/CLAUDE.md" ]; then
   install -D -m 644 /usr/local/share/ws/CLAUDE.md "$CLAUDE_CONFIG_DIR/CLAUDE.md"

@@ -29,6 +29,28 @@ tmux -V >/dev/null && pass "tmux runs"
 fc-list | grep -q "CaskaydiaCove Nerd Font" || fail "CaskaydiaCove Nerd Font isn't installed"
 pass "CaskaydiaCove Nerd Font is installed"
 
+# --- Editors with the dotfiles' settings
+out="$(nvim --headless +qa 2>&1)"
+if grep -E -q 'E[0-9]+:|Error' <<<"$out"; then fail "nvim reports errors at startup: $out"; fi
+for s in rust-analyzer pyrefly typescript-language-server lua-language-server; do
+  [ -e "$HOME/.local/share/nvim/mason/bin/$s" ] || fail "Mason didn't install $s"
+done
+pass "nvim starts cleanly, with its plugins and LSP servers"
+
+TERM=xterm-256color tmux -L ws-test new-session -d -s t
+[ "$(tmux -L ws-test show -gv prefix)" = C-Space ] || fail "tmux didn't load the dotfiles' config"
+[ "$(tmux -L ws-test show -gv @catppuccin_flavor)" = mocha ] || fail "tmux didn't load catppuccin"
+[ "$(tmux -L ws-test show -sv set-clipboard)" = on ] || fail "tmux's OSC 52 clipboard isn't on"
+tmux -L ws-test kill-server
+pass "tmux loads the dotfiles' config, catppuccin and the OSC 52 clipboard"
+
+[ -f "$HOME/.config/Code/User/settings.json" ] || fail "VS Code settings are missing"
+exts="$(code --list-extensions)"
+for e in asvetliakov.vscode-neovim ms-python.python anthropic.claude-code; do
+  grep -qix "$e" <<<"$exts" || fail "VS Code extension $e is missing"
+done
+pass "VS Code has the dotfiles' settings and its extensions"
+
 # --- Sync scripts against a local S3 server
 export XDG_RUNTIME_DIR; XDG_RUNTIME_DIR="$(mktemp -d)"
 s3="$(mktemp -d)"; mkdir -p "$s3/bucket"
@@ -54,11 +76,22 @@ ws-restore >/dev/null
 [ ! -e "$HOME/.claude/.credentials.json" ] || fail "restore copied .credentials.json"
 pass "restore copies work, keeps newer local files, skips credentials"
 
+# A synced settings.json with a stale value for each key the dotfiles set, and
+# one key of its own
+python3 -c 'import json, sys
+s = {k: "stale" for k in json.load(open(sys.argv[1]))}
+s["wsTestKeep"] = True
+json.dump(s, open(sys.argv[2], "w"))' /usr/local/share/ws/claude-settings.json "$CLAUDE_CONFIG_DIR/settings.json"
 ws-reconcile >/dev/null
 grep -q "/opt/ws/blender-mcp/bin/blender-mcp" "$CLAUDE_CONFIG_DIR/.claude.json" ||
   fail "ws-reconcile didn't register the MCP server"
 [ -f "$CLAUDE_CONFIG_DIR/CLAUDE.md" ] || fail "ws-reconcile didn't install CLAUDE.md"
-pass "ws-reconcile registers the MCP server and CLAUDE.md"
+python3 -c 'import json, sys
+want, got = json.load(open(sys.argv[1])), json.load(open(sys.argv[2]))
+sys.exit(not (all(got.get(k) == v for k, v in want.items()) and got.get("wsTestKeep") is True))' \
+  /usr/local/share/ws/claude-settings.json "$CLAUDE_CONFIG_DIR/settings.json" ||
+  fail "ws-reconcile didn't merge the dotfiles' Claude settings over the synced ones"
+pass "ws-reconcile registers the MCP server, CLAUDE.md and the dotfiles' Claude settings"
 
 echo "v2" > "$HOME/work/scene.txt"
 echo "secret" > "$HOME/.claude/.credentials.json"

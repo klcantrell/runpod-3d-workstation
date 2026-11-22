@@ -5,7 +5,7 @@ pod is deleted when you're done; your work lives in Cloudflare R2.
 
 - **Desktop:** KDE in your browser (Selkies), on port 8080 through Runpod's proxy,
   with the Ghostty terminal (Catppuccin Mocha theme, CaskaydiaCove Nerd Font)
-  next to KDE's own.
+  next to KDE's own, and VS Code, Neovim and tmux set up from your dotfiles.
 - **Blender** is in the image. **Isaac Sim** and **Unreal** install on first
   launch and are cached in R2, so later pods restore them quickly.
 - **Your work** (`~/work`, plus Blender, Unreal and Claude Code settings) is
@@ -225,6 +225,35 @@ Keep datasets and checkpoints outside `~/work`, which syncs to R2, and upload
 checkpoints to Hugging Face. `source .venv/bin/activate` also puts FFmpeg 7.1
 (with the libsvtav1 encoder) on the path for re-encoding datasets.
 
+### Editors and your dotfiles
+VS Code, Neovim and tmux come with the settings from
+[klcantrell/dotfiles](https://github.com/klcantrell/dotfiles), at the commit
+in `DOTFILES_REF` in the `Dockerfile` (as do Claude Code's; see
+[Claude Code](#claude-code)):
+
+- **Neovim:** `nvim/` goes to `~/.config/nvim`. Its plugins, LSP servers
+  (rust-analyzer, pyrefly, ts_ls, lua_ls) and treesitter parsers are installed
+  in the image, so `nvim` is ready on a new pod. Plugin versions come from
+  `rootfs/usr/local/share/ws/nvim/lazy-lock.json`, a copy of the lockfile on
+  the Mac this config runs on: the dotfiles have none, and the config needs
+  nvim-treesitter's `master` branch rather than today's default.
+- **tmux:** `.tmux.config` becomes `~/.tmux.conf`, with its plugins
+  (catppuccin, tpm, sensible, resurrect, continuum) installed. On the pod,
+  copying uses OSC 52 instead of `pbcopy`, which is macOS-only, so `y` in copy
+  mode copies to the clipboard of the terminal you're using, including
+  Ghostty on your Mac over SSH (`rootfs/usr/local/share/ws/tmux-pod.conf`).
+- **VS Code:** `vscode.settings.json` and `vscode.keybindings.json` go to
+  `~/.config/Code/User`. The extensions are listed in the `Dockerfile`:
+  vscode-neovim (it uses `nvim/init.lua`'s VS Code branch), Python, Pylance,
+  debugpy, Ruff, Pyrefly, Jupyter, USDA syntax, Claude Code, YAML, Even Better
+  TOML, Material Icon Theme and Tokyo Night. Keybindings that use `cmd` do
+  nothing on Linux.
+
+None of these settings are synced to R2, so changes on a pod are lost with
+it. To change them for good, push to the dotfiles repo; Renovate opens a PR
+here that moves `DOTFILES_REF`. Copy a new `lazy-lock.json` from the Mac when
+you change Neovim plugins.
+
 ### Claude Code
 Claude Code is installed in the image, with Blender connected through
 [Blender MCP](https://www.blender.org/lab/mcp-server/), Blender Lab's official
@@ -243,7 +272,11 @@ It can't import assets or generate models; ask Claude to script a download
 
 Your Claude Code settings, history and MCP servers (`~/.claude`) *are* synced.
 At boot the `blender` MCP server is re-registered to match the add-on in the
-image. `~/.claude/CLAUDE.md` tells Claude about this machine: where the apps
+image, and `claude-settings.json` from your dotfiles is merged into
+`~/.claude/settings.json`: each key it sets replaces the synced value, and keys
+it doesn't set are kept. Change those settings in the dotfiles repo, not on the
+pod, or the next boot puts them back. Its `cleanupPeriodDays` keeps
+conversation history indefinitely, so it keeps growing in R2. `~/.claude/CLAUDE.md` tells Claude about this machine: where the apps
 are, and that only `~/work` survives. Edit it as you like; delete it to get the
 image's current default on the next pod.
 
@@ -266,8 +299,13 @@ Other settings are `ENV` lines in the `Dockerfile`: `WS_AUTOSAVE_MINUTES` and
 
 Every version is pinned in the `Dockerfile`. Renovate opens a pull request
 (Mondays) when one has a new release: Blender, rclone, runpodctl, uv, Claude
-Code (stable channel), Blender MCP, Isaac Sim, the base desktop image, and
-the GitHub Actions. CI lints, builds and smoke-tests every PR.
+Code (stable channel), Blender MCP, Isaac Sim, the base desktop image,
+CaskaydiaCove Nerd Font, catppuccin for tmux, and the GitHub Actions. It also
+moves the commits pinned for your dotfiles and tmux's plugins when their
+branches move. CI lints, builds and smoke-tests every PR.
+
+VS Code, its extensions, Neovim, Ghostty and the other apt packages, and
+Neovim's LSP servers, aren't pinned: each build takes the newest.
 
 To take an update:
 1. Read the PR's release notes, check CI is green, and merge.
@@ -291,7 +329,8 @@ Notes:
 Lint locally before pushing (CI does the rest):
 ```sh
 brew install shellcheck
-shellcheck scripts/ws tests/*.sh rootfs/usr/local/lib/ws-lib.sh rootfs/usr/local/bin/* rootfs/etc/service/r2-sync/*
+shellcheck scripts/ws tests/*.sh rootfs/usr/local/lib/ws-lib.sh rootfs/usr/local/bin/* \
+  rootfs/etc/service/*/* rootfs/etc/profile.d/ws-ssh.sh
 ```
 
 ## Known caveats

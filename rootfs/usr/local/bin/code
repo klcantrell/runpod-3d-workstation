@@ -1,0 +1,7 @@
+#!/bin/sh
+# VS Code, sandboxed where the container grants the namespaces Electron's
+# sandbox needs, and with --no-sandbox where it doesn't (the container is the
+# isolation boundary then), as the base image does for Chrome. The desktop
+# entries are pointed here.
+# shellcheck disable=SC2046  # the flag, or nothing, as its own word
+exec /usr/bin/code $(unshare --user --map-root-user --pid --net --fork true 2>/dev/null || echo --no-sandbox) "$@"

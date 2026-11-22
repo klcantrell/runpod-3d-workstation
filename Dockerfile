@@ -23,6 +23,19 @@ ARG BLENDER_MCP_VERSION=1.0.3
 ARG ISAACSIM_VERSION=6.2.0.0
 # renovate: datasource=github-releases depName=ryanoasis/nerd-fonts extractVersion=^v(?<version>.+)$
 ARG NERD_FONTS_VERSION=3.5.1
+# renovate: datasource=github-releases depName=catppuccin/tmux extractVersion=^v(?<version>.+)$
+ARG CATPPUCCIN_TMUX_VERSION=2.3.2
+# Commits of these branches; Renovate moves them when the branch moves
+# renovate: datasource=git-refs depName=https://github.com/klcantrell/dotfiles branch=main
+ARG DOTFILES_REF=aa37b8d7c1151f0bcbd1d58ba96092d9bc85bc5a
+# renovate: datasource=git-refs depName=https://github.com/tmux-plugins/tpm branch=master
+ARG TPM_REF=e261deb1b47614eed3400089ce7197dc68acc4eb
+# renovate: datasource=git-refs depName=https://github.com/tmux-plugins/tmux-sensible branch=master
+ARG TMUX_SENSIBLE_REF=25cb91f42d020f675bb0a2ce3fbd3a5d96119efa
+# renovate: datasource=git-refs depName=https://github.com/tmux-plugins/tmux-resurrect branch=master
+ARG TMUX_RESURRECT_REF=cff343cf9e81983d3da0c8562b01616f12e8d548
+# renovate: datasource=git-refs depName=https://github.com/tmux-plugins/tmux-continuum branch=master
+ARG TMUX_CONTINUUM_REF=0698e8f4b17d6454c71bf5212895ec055c578da0
 
 # Rootless like the base, which hands the whole filesystem to the session user
 # (uid 1000) and runs its entrypoint and s6 services as that user: layers run
@@ -39,11 +52,34 @@ SHELL ["/usr/bin/fakeroot", "--", "/bin/bash", "-o", "pipefail", "-c"]
 
 # openssh-server for the sshd service, which makes a host key per pod: the
 # package's own keys would be shared by every pod, so they're removed.
+# Neovim's config needs a compiler and make (telescope-fzf-native, treesitter
+# parsers), Node.js and Python venvs (Mason's LSP servers), ripgrep (telescope)
+# and xclip (its clipboard on the desktop); tmux's config needs tmux-256color
+# from ncurses-term.
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         curl ca-certificates git unzip zstd xz-utils libnotify-bin openssh-server ghostty tmux \
+        neovim build-essential nodejs npm python3-venv ripgrep xclip ncurses-term \
         libxi6 libxkbcommon0 libsm6 libxxf86vm1 libgl1 libegl1 libvulkan1 && \
     apt-get clean && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_*
+
+# VS Code from Microsoft's apt repository, its key checked against the
+# fingerprint Microsoft publishes; the package is told not to add a second
+# copy of the repository. Its desktop entries go through /usr/local/bin/code,
+# which drops Electron's sandbox only where the container denies it. The
+# sandbox helper loses its setuid bit: under fakeroot it would be setuid to
+# the session user, which Electron refuses.
+RUN fetch-verified key https://packages.microsoft.com/keys/microsoft.asc \
+      BC528686B50D79E339D3721CEB3E94ADBE1229CF /etc/apt/keyrings/microsoft.asc && \
+    printf 'Types: deb\nURIs: https://packages.microsoft.com/repos/code\nSuites: stable\nComponents: main\nArchitectures: amd64\nSigned-By: /etc/apt/keyrings/microsoft.asc\n' \
+      > /etc/apt/sources.list.d/vscode.sources && \
+    echo "code code/add-microsoft-repo boolean false" | debconf-set-selections && \
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends code && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    chmod 755 /usr/share/code/chrome-sandbox && \
+    sed -i 's#/usr/share/code/code#/usr/local/bin/code#g' /usr/share/applications/code*.desktop && \
+    grep -q /usr/local/bin/code /usr/share/applications/code.desktop
 
 # Blender
 RUN mkdir -p /opt/blender && \
@@ -72,6 +108,7 @@ RUN --mount=type=secret,id=github_token,uid=1000 \
 
 COPY --chown=1000:1000 rootfs/ /
 RUN chmod 755 /usr/local/bin/ws-* /usr/local/bin/install-* /usr/local/bin/isaacsim /usr/local/bin/unreal \
+      /usr/local/bin/code \
       /etc/service/r2-sync/run /etc/service/r2-sync/finish \
       /etc/service/sshd/run /etc/service/sshd/finish
 
@@ -117,6 +154,55 @@ RUN git -c advice.detachedHead=false clone -q --depth 1 --branch "v${BLENDER_MCP
     rm -rf /tmp/blender_mcp && \
     /opt/ws/blender-mcp/bin/blender-mcp --help >/dev/null && \
     blender -b --python-exit-code 1 --python /usr/local/lib/blender-check-mcp.py
+
+# Neovim, tmux and VS Code settings from the user's dotfiles
+# (github.com/klcantrell/dotfiles) at DOTFILES_REF, which aren't synced to R2:
+# a new image brings new dotfiles. Claude Code's settings go beside the image's
+# CLAUDE.md, since ~/.claude is synced; ws-reconcile merges them in at boot. Neovim's plugins are pinned by a
+# lazy-lock.json from the user's Mac, since the dotfiles carry none and the
+# config needs nvim-treesitter's master branch. Its plugins, LSP servers and
+# treesitter parsers are installed here, so nvim is ready on a new pod;
+# nvim-ready.lua fails the build if they don't install. The second run
+# installs the plugins of the config's VS Code (vscode-neovim) branch. tmux
+# gets its plugins at pinned commits and an OSC 52 clipboard in place of
+# pbcopy (tmux-pod.conf).
+RUN git clone -q https://github.com/klcantrell/dotfiles /tmp/dotfiles && \
+    git -C /tmp/dotfiles -c advice.detachedHead=false checkout -q "$DOTFILES_REF" && \
+    mkdir -p "$HOME/.config/nvim" "$HOME/.config/Code/User" && \
+    cp -R /tmp/dotfiles/nvim/. "$HOME/.config/nvim/" && \
+    cp /usr/local/share/ws/nvim/lazy-lock.json "$HOME/.config/nvim/" && \
+    cp /tmp/dotfiles/vscode.settings.json "$HOME/.config/Code/User/settings.json" && \
+    cp /tmp/dotfiles/vscode.keybindings.json "$HOME/.config/Code/User/keybindings.json" && \
+    cat /tmp/dotfiles/.tmux.config /usr/local/share/ws/tmux-pod.conf > "$HOME/.tmux.conf" && \
+    install -m 644 /tmp/dotfiles/claude-settings.json /usr/local/share/ws/claude-settings.json && \
+    rm -rf /tmp/dotfiles && \
+    nvim --headless -c 'luafile /usr/local/share/ws/nvim-ready.lua' && \
+    nvim --headless --cmd 'let g:vscode = v:true' '+Lazy! install' +qa && \
+    plugin() { \
+      git clone -q "https://github.com/$1" "$HOME/.tmux/plugins/${1#*/}" && \
+      git -C "$HOME/.tmux/plugins/${1#*/}" -c advice.detachedHead=false checkout -q "$2"; \
+    } && \
+    plugin tmux-plugins/tpm "$TPM_REF" && \
+    plugin tmux-plugins/tmux-sensible "$TMUX_SENSIBLE_REF" && \
+    plugin tmux-plugins/tmux-resurrect "$TMUX_RESURRECT_REF" && \
+    plugin tmux-plugins/tmux-continuum "$TMUX_CONTINUUM_REF" && \
+    git -c advice.detachedHead=false clone -q --depth 1 --branch "v${CATPPUCCIN_TMUX_VERSION}" \
+      https://github.com/catppuccin/tmux "$HOME/.tmux/plugins/catppuccin/tmux"
+
+# VS Code extensions (the latest of each when the image is built)
+RUN code --install-extension asvetliakov.vscode-neovim \
+      --install-extension pkief.material-icon-theme \
+      --install-extension enkia.tokyo-night \
+      --install-extension ms-python.python \
+      --install-extension ms-python.vscode-pylance \
+      --install-extension ms-python.debugpy \
+      --install-extension charliermarsh.ruff \
+      --install-extension meta.pyrefly \
+      --install-extension ms-toolsai.jupyter \
+      --install-extension animallogic.vscode-usda-syntax \
+      --install-extension anthropic.claude-code \
+      --install-extension redhat.vscode-yaml \
+      --install-extension tamasfe.even-better-toml
 
 # Nothing may be left in the synced folders: restore skips R2 files that are
 # older than local ones, so anything baked here would hide the user's copy.

@@ -10,6 +10,14 @@
       "matchStrings": [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)( extractVersion=(?<extractVersion>\\S+))?\\s+ARG \\S+=(?<currentValue>\\S+)"
       ]
+    },
+    {
+      "description": "ARG commits in the Dockerfile that follow a branch, marked with '# renovate: ... branch=<name>'",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)Dockerfile$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>git-refs) depName=(?<depName>\\S+) branch=(?<currentValue>\\S+)\\s+ARG \\S+=(?<currentDigest>[0-9a-f]{40})"
+      ]
     }
   ],
   "packageRules": [
