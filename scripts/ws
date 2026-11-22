@@ -5,7 +5,8 @@
 #
 #   up       create the pod, then wait for its desktop, or its SSH (as wait)
 #   wait     wait for the desktop (or SSH, with WS_SSH=true) and notify
-#   ssh      log in to the pod over SSH (WS_SSH=true); extra args go to ssh
+#   ssh      log in to the pod over SSH (WS_SSH=true); extra args go to ssh.
+#            ssh --url prints its ssh:// URL instead, for other SSH clients
 #   status   show the pod, its cost, and how to reach it, plus any other pods
 #   logs     show the pod's container log (e.g. why the desktop didn't start)
 #   down     delete the pod (prefer "Save & Terminate" on the pod's desktop)
@@ -112,6 +113,14 @@ desktop_up() {
   [ "$code" = 401 ] || [ "$code" = 200 ]
 }
 
+# ssh://ubuntu@ip:port for the pod, nothing until Runpod has mapped port 22.
+# Changes with every pod.
+ssh_url() {
+  local ip port _
+  read -r ip port _ <<<"$(ssh_addr "$1")"
+  if [ -n "${port:-}" ]; then echo "ssh://ubuntu@$ip:$port"; fi
+}
+
 # The port is mapped minutes before sshd answers, so wait for its banner
 ssh_up() {
   local ip port _
@@ -129,6 +138,7 @@ wait_for_pod() {
     if "$check" "$id"; then
       if [ "$WS_SSH" = true ]; then
         echo "SSH is up. Log in with: $WS_CMD ssh"
+        echo "Or with another SSH client: $(ssh_url "$id")"
         notify "SSH is up on pod $id ($WS_NAME)."
       else
         echo "Desktop is up: https://$id-8080.proxy.runpod.net"
@@ -215,7 +225,8 @@ case "${1:-}" in
             python3 -c 'import sys, json; print((json.load(sys.stdin).get("machine") or {}).get("dataCenterId") or "?")' 2>/dev/null || echo "?")"
       echo "Pod $id  $gpu  in $dc  state=$state  \$$cost/hr"
       echo "Desktop: https://$id-8080.proxy.runpod.net"
-      if [ -n "$(ssh_addr "$id")" ]; then echo "SSH: $WS_CMD ssh"; fi
+      url="$(ssh_url "$id")"
+      if [ -n "$url" ]; then echo "SSH: $WS_CMD ssh  ($url)"; fi
     done <<<"$pods"
     # Another profile's pod (or anything else) bills too; don't let it hide
     runpodctl pod list --all | WS_NAME="$WS_NAME" python3 -c '
@@ -240,6 +251,7 @@ if not others and not sys.argv[1]:
     id="${pods%% *}"
     read -r ip port key <<<"$(ssh_addr "$id")" || true
     [ -n "${port:-}" ] || { echo "Pod $id has no SSH port (yet). It needs WS_SSH=true when created; see $WS_CMD status" >&2; exit 1; }
+    if [ "${2:-}" = --url ]; then echo "ssh://ubuntu@$ip:$port"; exit 0; fi
     # Keyed by pod ID, not ip:port, which Runpod reuses for other pods
     args=(-p "$port" -o HostKeyAlias="runpod-$id" -o StrictHostKeyChecking=accept-new
           -o UserKnownHostsFile="$HOME/.config/ws/known_hosts")

@@ -170,12 +170,21 @@ EOF
 
 ws -p train up       # creates a pod named "train" and notifies you when SSH answers
 ws -p train ssh      # log in as ubuntu; extra arguments go to ssh
+ws -p train ssh --url   # ssh://ubuntu@<ip>:<port>, for another SSH client such as Rex
 ws -p train status   # every ws command takes -p; plain ws status also lists this pod
 ```
 
 `WS_SSH=true` exposes port 22 and has Runpod pass your account's SSH keys to the
 pod; `ws ssh` uses the key `runpodctl doctor` registered. The pod only accepts
 key logins. Its desktop still starts, but nothing waits for it.
+
+The `ssh://` URL (also printed by `ws up` and `ws status`) changes with every
+pod. Another client has to offer a key the pod accepts without being told
+which: load runpodctl's with `ssh-add ~/.runpod/ssh/runpodctl-ssh-key`, or add
+your usual key to Runpod (`runpodctl ssh add-key`) so new pods accept it too.
+Each pod also has a new host key, and Runpod reuses addresses, so such a
+client may warn that a host key changed; `ws ssh` keeps its own list, keyed by
+pod, to avoid that.
 
 Over SSH you don't see desktop notifications. The login message says when the
 pod will save and delete itself; run `ws-extend` to keep it longer, `ws-save`
