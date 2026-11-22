@@ -21,6 +21,8 @@ ARG CLAUDE_CODE_VERSION=2.1.311
 ARG BLENDER_MCP_VERSION=1.0.3
 # renovate: datasource=pypi depName=isaacsim
 ARG ISAACSIM_VERSION=6.2.0.0
+# renovate: datasource=github-releases depName=ryanoasis/nerd-fonts extractVersion=^v(?<version>.+)$
+ARG NERD_FONTS_VERSION=3.5.1
 
 # Rootless like the base, which hands the whole filesystem to the session user
 # (uid 1000) and runs its entrypoint and s6 services as that user: layers run
@@ -55,6 +57,18 @@ RUN curl -fsSL "https://downloads.rclone.org/v${RCLONE_VERSION}/rclone-v${RCLONE
     curl -fsSL "https://github.com/runpod/runpodctl/releases/download/v${RUNPODCTL_VERSION}/runpodctl-linux-amd64" -o /usr/local/bin/runpodctl && \
     chmod 755 /usr/local/bin/rclone /usr/local/bin/runpodctl
 COPY --from=ghcr.io/astral-sh/uv:0.13.7 --chown=1000:1000 /uv /uvx /usr/local/bin/
+
+# CaskaydiaCove Nerd Font (Cascadia Code with icons), for Ghostty and VS Code.
+# The base image's fetch-verified checks the download against the SHA-256
+# GitHub records for the release asset; the build's token, where passed, lifts
+# GitHub's anonymous API limit.
+RUN --mount=type=secret,id=github_token,uid=1000 \
+    fetch-verified release ryanoasis/nerd-fonts "v${NERD_FONTS_VERSION}" CascadiaCode.tar.xz /tmp/CascadiaCode.tar.xz >/dev/null && \
+    mkdir -p /usr/local/share/fonts/caskaydia-cove && \
+    tar -xJf /tmp/CascadiaCode.tar.xz -C /usr/local/share/fonts/caskaydia-cove --wildcards 'CaskaydiaCoveNerdFont-*.ttf' && \
+    rm /tmp/CascadiaCode.tar.xz && \
+    fc-cache -f /usr/local/share/fonts/caskaydia-cove && \
+    fc-list | grep -q "CaskaydiaCove Nerd Font"
 
 COPY --chown=1000:1000 rootfs/ /
 RUN chmod 755 /usr/local/bin/ws-* /usr/local/bin/install-* /usr/local/bin/isaacsim /usr/local/bin/unreal \

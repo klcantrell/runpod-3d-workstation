@@ -1,3 +1,5 @@
 # Shipped by the image (~/.config/ghostty isn't synced to R2, so edits here
 # last only as long as the pod)
 theme = Catppuccin Mocha
+font-family = CaskaydiaCove Nerd Font
+font-feature = -calt

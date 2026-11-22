@@ -26,6 +26,8 @@ pass "blender enables the MCP add-on"
 ghostty +validate-config >/dev/null || fail "Ghostty rejects its config"
 pass "ghostty has its theme and a valid config"
 tmux -V >/dev/null && pass "tmux runs"
+fc-list | grep -q "CaskaydiaCove Nerd Font" || fail "CaskaydiaCove Nerd Font isn't installed"
+pass "CaskaydiaCove Nerd Font is installed"
 
 # --- Sync scripts against a local S3 server
 export XDG_RUNTIME_DIR; XDG_RUNTIME_DIR="$(mktemp -d)"
