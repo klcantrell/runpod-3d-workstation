@@ -25,6 +25,7 @@ pass "blender enables the MCP add-on"
 [ -f "/usr/share/ghostty/themes/Catppuccin Mocha" ] || fail "Ghostty's Catppuccin Mocha theme is missing"
 ghostty +validate-config >/dev/null || fail "Ghostty rejects its config"
 pass "ghostty has its theme and a valid config"
+tmux -V >/dev/null && pass "tmux runs"
 
 # --- Sync scripts against a local S3 server
 export XDG_RUNTIME_DIR; XDG_RUNTIME_DIR="$(mktemp -d)"

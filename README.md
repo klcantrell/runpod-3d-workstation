@@ -180,6 +180,10 @@ Over SSH you don't see desktop notifications. The login message says when the
 pod will save and delete itself; run `ws-extend` to keep it longer, `ws-save`
 to save, and `ws-save-and-terminate` when you're done.
 
+Run long jobs inside `tmux` (in the image), so they keep going if the SSH
+connection drops: `tmux new -s train` to start, `Ctrl-b d` to detach, and
+`tmux attach -t train` after logging in again. Deleting the pod still ends them.
+
 `ws down` deletes the pod from your Mac without a final save (you could lose up
 to 10 minutes of work). Use it only if the desktop is unreachable.
 
@@ -209,6 +213,7 @@ then PCIe), with the L40S as a fallback when none are in stock.
 
 Then, over `ws -p train ssh`:
 ```sh
+tmux new -s train   # so a dropped connection doesn't stop training
 install-groot
 ws-extend 4    # the time limit deletes the pod even mid-training
 cd ~/apps/Isaac-GR00T && source .venv/bin/activate

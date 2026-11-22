@@ -39,7 +39,7 @@ SHELL ["/usr/bin/fakeroot", "--", "/bin/bash", "-o", "pipefail", "-c"]
 # package's own keys would be shared by every pod, so they're removed.
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        curl ca-certificates git unzip zstd xz-utils libnotify-bin openssh-server ghostty \
+        curl ca-certificates git unzip zstd xz-utils libnotify-bin openssh-server ghostty tmux \
         libxi6 libxkbcommon0 libsm6 libxxf86vm1 libgl1 libegl1 libvulkan1 && \
     apt-get clean && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_*
 
