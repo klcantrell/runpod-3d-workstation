@@ -1,7 +1,8 @@
 #!/bin/bash
 # Manage the ephemeral 3D workstation pod from your Mac.
 #
-#   ws up       create the pod and print its desktop URL
+#   ws up       create the pod, then wait for its desktop (as ws wait)
+#   ws wait     wait for the desktop to answer and send a notification
 #   ws status   show the pod, its cost, and its URL
 #   ws logs     show the pod's container log (e.g. why the desktop didn't start)
 #   ws down     delete the pod (prefer "Save & Terminate" on the pod's desktop)
@@ -56,6 +57,44 @@ for p in json.load(sys.stdin) or []:
         print(p["id"], status, p.get("costPerHr", "?"), p.get("gpuId") or "?")' <<<"$json"
 }
 
+# Polls the pod's desktop until it answers, then notifies. The proxy answers 502
+# (or 404) until Selkies is listening; Selkies then answers 401 (basic auth).
+wait_for_desktop() {
+  local id="$1" url="https://$1-8080.proxy.runpod.net" deadline code pods
+  deadline=$(( $(date +%s) + ${WS_WAIT_MINUTES:-30} * 60 ))
+  echo "Waiting for the desktop at $url (Ctrl-C stops waiting; the pod keeps booting)..."
+  while :; do
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$url/" || true)"
+    if [ "$code" = 401 ] || [ "$code" = 200 ]; then
+      echo "Desktop is up: $url"
+      echo "Wait for its Restore complete notification before opening Blender or Claude Code."
+      notify "Desktop is up on pod $id. Wait for Restore complete before opening Blender."
+      return 0
+    fi
+    # A failed API call isn't a missing pod; keep waiting
+    if pods="$(find_pods)" && [ -z "$pods" ]; then
+      echo "Pod $id is gone." >&2
+      notify "Pod $id is gone."
+      return 1
+    fi
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      echo "Desktop still not up after ${WS_WAIT_MINUTES:-30} minutes (last HTTP $code). See: ws logs" >&2
+      notify "Desktop still not up on pod $id. See ws logs."
+      return 1
+    fi
+    sleep 10
+  done
+}
+
+notify() {
+  printf '\a'
+  if command -v osascript >/dev/null; then
+    osascript -e 'on run argv' -e 'display notification (item 1 of argv) with title "ws" sound name "Glass"' -e 'end run' "$1" || true
+  elif command -v notify-send >/dev/null; then
+    notify-send ws "$1" || true
+  fi
+}
+
 json_field() { python3 -c 'import sys, json; print(json.load(sys.stdin).get(sys.argv[1]) or "")' "$1"; }
 
 case "${1:-}" in
@@ -81,7 +120,8 @@ case "${1:-}" in
         id="$(json_field id <<<"$out")"
         echo "Created pod $id ($gpu). The desktop takes a few minutes to boot."
         echo "Desktop: https://$id-8080.proxy.runpod.net  (user: ubuntu, password: your desktop_password secret)"
-        exit 0
+        wait_for_desktop "$id"
+        exit
       fi
       sed 's/^/  /' "$err" | tail -3
       # A failed create (timeout, 5xx) can still have made a pod; never add a
@@ -105,6 +145,11 @@ case "${1:-}" in
       echo "Desktop: https://$id-8080.proxy.runpod.net"
     done <<<"$pods"
     ;;
+  wait)
+    pods="$(find_pods)"
+    [ -n "$pods" ] || { echo "No pod named $WS_NAME. Run: ws up"; exit 1; }
+    wait_for_desktop "${pods%% *}"
+    ;;
   logs)
     pods="$(find_pods)"
     [ -n "$pods" ] || { echo "No pod named $WS_NAME."; exit 0; }
@@ -125,7 +170,7 @@ case "${1:-}" in
     done <<<"$pods"
     ;;
   *)
-    sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
     exit 1
     ;;
 esac

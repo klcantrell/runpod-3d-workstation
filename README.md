@@ -127,10 +127,15 @@ ln -s "$PWD/scripts/ws" /usr/local/bin/ws   # or add scripts/ to PATH
 ## Daily use
 
 ```sh
-ws up       # prints https://<pod>-8080.proxy.runpod.net. Log in as ubuntu / desktop_password
+ws up       # prints https://<pod>-8080.proxy.runpod.net, then notifies you when it's up
+ws wait     # wait for the desktop again (e.g. after Ctrl-C) and notify
 ws status   # GPU, datacenter, $/hr, URL. Is anything running (and costing money)?
 ws logs     # container log, e.g. if the desktop never comes up
 ```
+
+`ws up` waits for the desktop to answer (up to `WS_WAIT_MINUTES`, default 30)
+and then sends a macOS notification. Ctrl-C stops waiting; the pod keeps
+booting. Log in as ubuntu / desktop_password.
 
 Wait for the **Restore complete** notification before opening Blender or
 Claude Code. Work inside `~/work` on the pod; that folder is the one that gets
